@@ -1,6 +1,16 @@
 import asyncio
 
 
+class FakeSerializer:
+    @staticmethod
+    def serialize(obj):
+        return f"X-{obj}".encode()
+
+    @staticmethod
+    def deserialize(data):
+        return {"type": "ping", "data": {"v": data.decode()}}
+
+
 class FakeTransport(asyncio.Transport):
     """
     A minimal in-memory implementation of asyncio.Transport

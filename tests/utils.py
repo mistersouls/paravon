@@ -1,8 +1,10 @@
 import ipaddress
 from datetime import datetime, timedelta, UTC
+from pathlib import Path
+
 from cryptography import x509
 from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 
@@ -103,3 +105,15 @@ def generate_cert_pair():
     client_key, client_cert = generate_cert("client.test")
 
     return ca_cert, server_key, server_cert, client_key, client_cert
+
+
+def write_pem(obj, path: Path) -> None:
+    if isinstance(obj, x509.Certificate):
+        data = obj.public_bytes(serialization.Encoding.PEM)
+    else:
+        data = obj.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+    path.write_bytes(data)

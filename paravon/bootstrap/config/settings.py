@@ -147,7 +147,6 @@ class ServerSettings(BaseModel):
 class ParavonConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PARAVON_",
-        yaml_file=get_configfile(),
         extra="allow"
     )
 
@@ -165,14 +164,14 @@ class ParavonConfig(BaseSettings):
 
     @classmethod
     def settings_customise_sources(
-            cls,
-            settings_cls: type[BaseSettings],
-            init_settings: PydanticBaseSettingsSource,
-            env_settings: PydanticBaseSettingsSource,
-            dotenv_settings: PydanticBaseSettingsSource,
-            file_secret_settings: PydanticBaseSettingsSource,
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return (YamlConfigSettingsSource(settings_cls),)
+        return (YamlConfigSettingsSource(settings_cls, yaml_file=get_configfile()),)
 
     def get_server_ssl_ctx(self) -> ssl.SSLContext:
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
