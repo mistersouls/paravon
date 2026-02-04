@@ -43,6 +43,12 @@ class MessageServer:
 
         self._server: asyncio.AbstractServer | None = None
 
+    @property
+    def running(self) -> bool:
+        if self._server is None:
+            return False
+        return self._server.is_serving()
+
     def create_protocol(self) -> asyncio.Protocol:
         loop = self._loop
         return Protocol(
@@ -53,6 +59,10 @@ class MessageServer:
         )
 
     async def start(self) -> None:
+        if self._server:
+            self._logger.info("Server is already running.")
+            return
+
         config = self._config
         host = config.host
         port = config.port
