@@ -1,0 +1,57 @@
+# =====================================================================
+# Server settings (TCP + TLS)
+# =====================================================================
+server:
+  api:
+    # [Default: 127.0.0.1]
+    # Host/IP on which the client-facing API listens.
+    # This is the bind address used locally by the OS.
+    host: "127.0.0.1"
+
+    # [Default: 2000]
+    # TCP port for client requests (GET/PUT).
+    port: 2000
+
+  peer:
+    # [Default: 127.0.0.1]
+    # Host/IP on which the inter-node server listens.
+    host: "127.0.0.1"
+
+    # [Default: 12000]
+    # TCP port used for inter-node communication:
+    # join, leave, sync/view, replication, handoff, partition transfers.
+    port: 12000
+
+  tls:
+    # [Required]
+    # Path to the node's TLS certificate (PEM).
+    # Used for both client and peer servers.
+    certfile: ""
+
+    # [Required]
+    # Path to the node's TLS private key (PEM).
+    keyfile: ""
+
+    # [Required]
+    # Path to the CA certificate (PEM) used to verify client and peer certificates.
+    cafile: ""
+
+  # [Default: 128]
+  # Maximum number of pending TCP connections allowed by the OS.
+  backlog: 128
+
+  # [Default: 5.0]
+  # Maximum time (in seconds) allowed for a graceful shutdown.
+  timeout_graceful_shutdown: 5.0
+
+  # [Default: 1024]
+  # Maximum number of concurrent in-flight requests handled by the node.
+  limit_concurrency: 1024
+
+  # [Default: 4194304 (4MB)]
+  # Maximum allowed buffer size for incoming data (in bytes).
+  max_buffer_size: 4194304
+
+  # [Default: 1048576 (1MB)]
+  # Maximum allowed size for a single decoded message (in bytes).
+  max_message_size: 1048576
