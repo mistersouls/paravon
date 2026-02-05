@@ -41,7 +41,14 @@ class MessageServer:
         self.state = ServerState()
         self._logger = logging.getLogger("core.transport.server")
 
-        self._server: asyncio.AbstractServer | None = None
+        self._server: asyncio.Server | None = None
+
+    @property
+    def listen(self) -> tuple[str, int]:
+        if self._server is None:
+            raise RuntimeError("Call first start() before to read listen")
+
+        return self._server.sockets[0].getsockname()
 
     @property
     def running(self) -> bool:
@@ -74,6 +81,7 @@ class MessageServer:
             backlog=config.backlog,
             ssl=config.ssl_ctx
         )
+        sock = self._server.sockets[0].getsockname()
 
     async def shutdown(self) -> None:
         if self._server:

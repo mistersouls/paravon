@@ -10,6 +10,22 @@ from pydantic_core.core_schema import ValidationInfo
 from paravon.bootstrap.config.loader import get_configfile
 
 
+class NodeSettings(BaseSettings):
+    id: Annotated[
+        str,
+        Field(
+            description=(
+                "Unique and stable identifier for this node within the cluster.\n"
+                "This value must be globally unique and must not change across restarts.\n"
+                "It is used as the node's identity in gossip, vnode ownership, routing,\n"
+                "rebalance planning, and all cluster‑wide coordination.\n\n"
+                "The identifier should be explicit (e.g., 'node-1', 'db-a', 'shard-3') and\n"
+                "must not depend on ephemeral properties such as IP address or hostname.\n"
+            )
+        )
+    ]
+
+
 class ApiServerSettings(BaseModel):
     host: Annotated[
         str,
@@ -42,6 +58,17 @@ class PeerServerSettings(BaseModel):
         Field(
             description="TCP port for inter-node communication.",
             default=12000
+        )
+    ]
+
+    seeds: Annotated[
+        list[str],
+        Field(
+            description=(
+                "List of seed node addresses (host:port) used during bootstrap.\n"
+                "Seeds are only used at startup to obtain membership and ring layout."
+            ),
+            default_factory=list
         )
     ]
 
@@ -144,11 +171,36 @@ class ServerSettings(BaseModel):
     ]
 
 
+class StorageSettings(BaseModel):
+    data_dir: Annotated[
+        Path,
+        Field(
+            description=(
+                "Directory where the node stores all persistent data.\n"
+                "This directory is used by the storage backend.\n"
+                "It must exist or be creatable, writable, and persistent across restarts.\n\n"
+            )
+        )
+    ]
+
+
 class ParavonConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PARAVON_",
         extra="allow"
     )
+
+    node: Annotated[
+        NodeSettings,
+        Field(
+            description=(
+                "Node‑level configuration.\n"
+                "Defines the node's identity and its size class for vnode generation.\n"
+                "This section determines how the node participates in the ring and how\n"
+                "it is identified by peers during gossip, routing, and replication."
+            )
+        )
+    ]
 
     server: Annotated[
         ServerSettings,
@@ -158,6 +210,18 @@ class ParavonConfig(BaseSettings):
                 "Controls how the node listens for incoming TCP connections, enforces\n"
                 "TLS security, and applies runtime limits such as concurrency, buffer\n"
                 "sizes, and graceful shutdown behavior."
+            )
+        )
+    ]
+
+    storage: Annotated[
+        StorageSettings,
+        Field(
+            description=(
+                "Storage backend configuration.\n"
+                "Defines the directory where all persistent data is stored, including\n"
+                "partitions, metadata, and vnode assignments. This directory must be\n"
+                "stable and writable across restarts."
             )
         )
     ]

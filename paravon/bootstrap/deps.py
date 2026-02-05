@@ -7,16 +7,23 @@ from paravon.bootstrap.config.settings import ParavonConfig
 from paravon.core.controlplane import ControlPlane
 from paravon.core.facade import ParaCore
 from paravon.core.routing.app import RoutedApplication
+from paravon.infra.lmdb_storage import LMDBStorageFactory
 from paravon.infra.msgpack_serializer import MsgPackSerializer
 
 
 @lru_cache
 def get_cp() -> ControlPlane:
+    config = get_config()
+    storage_factory = LMDBStorageFactory(
+        path=config.storage.data_dir
+    )
+
     return ControlPlane(
-        config=get_config(),
+        config=config,
         api_app=get_api_app(),
         peer_app=get_peer_app(),
-        serializer=MsgPackSerializer()
+        serializer=MsgPackSerializer(),
+        storage_factory=storage_factory
     )
 
 

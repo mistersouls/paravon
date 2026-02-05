@@ -4,9 +4,11 @@ import ssl
 
 from paravon.bootstrap.config.settings import ParavonConfig
 from paravon.core.facade import ParaCore
-from paravon.core.models.config import ServerConfig
+from paravon.core.models.config import ServerConfig, PeerConfig
 from paravon.core.ports.serializer import Serializer
+from paravon.core.ports.storage import StorageFactory
 from paravon.core.service.lifecycle import LifecycleService
+from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.node import NodeService
 from paravon.core.service.storage import StorageService
 from paravon.core.transport.application import Application
@@ -20,6 +22,7 @@ class ControlPlane:
         api_app: Application,
         peer_app: Application,
         serializer: Serializer,
+        storage_factory: StorageFactory,
     ) -> None:
         self._config = config
         self._api_app = api_app
@@ -27,12 +30,17 @@ class ControlPlane:
         self._loop = self._create_event_loop()
         self._server_ssl_ctx = self._config.get_server_ssl_ctx()
         self._serializer = serializer
+        self._storage_factory = storage_factory
         self._api_config = self._build_api_config(self._server_ssl_ctx)
         self._peer_config = self._build_peer_config(self._server_ssl_ctx)
         self._background_tasks: set[asyncio.Task] = set()
 
         self._logger = logging.getLogger("paravon.controlplane")
 
+        self._meta_manager = NodeMetaManager(
+            peer_config=self._peer_config,
+            system_storage=self._storage_factory.create("system")
+        )
         self._api_server = MessageServer(
             config=self._api_config,
             serializer=self._serializer,
@@ -45,12 +53,15 @@ class ControlPlane:
         )
         self._node_service = NodeService(
             api_server=self._api_server,
+            meta_manager=self._meta_manager,
         )
         self._storage_service = StorageService()
         self._lifecycle_service = LifecycleService(
             node_service=self._node_service,
             api_server=self._api_server,
             peer_server=self._peer_server,
+            peer_config=self._peer_config,
+            meta_manager=self._meta_manager
         )
 
     def build_core(self) -> ParaCore:
@@ -86,11 +97,13 @@ class ControlPlane:
 
         return config
 
-    def _build_peer_config(self, server_ctx: ssl.SSLContext) -> ServerConfig:
+    def _build_peer_config(self, server_ctx: ssl.SSLContext) -> PeerConfig:
         server_config = self._config.server
         peer_config = server_config.peer
+        node_config = self._config.node
 
-        config = ServerConfig(
+        config = PeerConfig(
+            node_id=node_config.id,
             app=self._api_app,
             host=peer_config.host,
             port=peer_config.port,
@@ -100,6 +113,7 @@ class ControlPlane:
             max_buffer_size=server_config.max_buffer_size,
             max_message_size=server_config.max_message_size,
             timeout_graceful_shutdown=server_config.timeout_graceful_shutdown,
+            seeds=set(peer_config.seeds)
         )
 
         return config

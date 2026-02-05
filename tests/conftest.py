@@ -58,6 +58,9 @@ def config_file(tmp_path_factory, tls_settings):
     file = base / "paranode.yaml"
 
     data = {
+        "node": {
+            "id": "node-1"
+        },
         "server": {
             "api": {
                 "host": "127.0.0.1",
@@ -66,6 +69,7 @@ def config_file(tmp_path_factory, tls_settings):
             "peer": {
                 "host": "127.0.0.1",
                 "port": 0,
+                "seeds": []
             },
             "tls": {
                 "certfile": str(server_tls.certfile),
@@ -77,6 +81,9 @@ def config_file(tmp_path_factory, tls_settings):
             "limit_concurrency": 10,
             "max_buffer_size": 1024 * 1024,
             "max_message_size": 1024 * 1024,
+        },
+        "storage": {
+            "data_dir": str(base / "data")
         }
     }
 

@@ -63,3 +63,9 @@ class ServerConfig:
     - background tasks registered in ServerState.tasks must complete
     After this timeout, remaining tasks are cancelled.
     """
+
+
+@dataclass(kw_only=True)
+class PeerConfig(ServerConfig):
+    node_id: str
+    seeds: set[str]
