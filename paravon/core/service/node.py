@@ -17,13 +17,13 @@ class NodeService:
         self._join_done = asyncio.Event()
 
     async def join(self) -> Message:
-        ...
+        return Message(type="ko", data={"message": "Not implemented yet"})
 
     async def drain(self) -> Message:
-        ...
+        return Message(type="ko", data={"message": "Not implemented yet"})
 
     async def remove(self) -> Message:
-        ...
+        return Message(type="ko", data={"message": "Not implemented yet"})
 
     async def wait_join(self) -> None:
         await self._join_done.wait()

@@ -104,7 +104,7 @@ class ControlPlane:
 
         config = PeerConfig(
             node_id=node_config.id,
-            app=self._api_app,
+            app=self._peer_app,
             host=peer_config.host,
             port=peer_config.port,
             backlog=server_config.backlog,
