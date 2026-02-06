@@ -1,0 +1,87 @@
+# ~/.para/paraconf.yaml
+#
+# Paravon CLI Configuration
+# =========================
+# This file tells the Paravon CLI how to connect securely to your cluster.
+# You can define multiple "contexts" (dev, staging, prod, etc.) and switch
+# between them using:
+#
+#   paractl config use-context <name>
+#
+# The CLI always uses the context listed under "current-context" unless
+# you override it with --context or --server on the command line.
+
+
+# The context the CLI uses by default.
+current-context: dev
+
+
+# All available connection contexts.
+contexts:
+
+  # ---------------------------------------------------------------------------
+  # Development environment
+  # ---------------------------------------------------------------------------
+  dev:
+    # Address of the Paravon node or load balancer.
+    #
+    # This can be:
+    #   - an IP address (e.g., "127.0.0.1:9000")
+    #   - a fully-qualified domain name (FQDN)
+    #     pointing to a load balancer (e.g., "paravon.dev.example.com:9000")
+    #
+    # If you want to target a specific node directly, you can override this
+    # value at runtime using:
+    #
+    #   paractl --server <host:port> <command>
+    #
+    server: "127.0.0.1:9000"
+
+    # TLS configuration for secure mTLS communication.
+    tls:
+      # Certificate Authority used to verify the server certificate.
+      ca: "~/.para/certs/ca.pem"
+
+      # Client certificate used to authenticate *you* to the cluster.
+      cert: "~/.para/certs/client.pem"
+
+      # Private key associated with the client certificate.
+      key: "~/.para/certs/client-key.pem"
+
+    # Settings specific to the Paravon CLI client.
+    client:
+      # Logical identifier for this CLI instance.
+      # Useful for logs, auditing, and distributed tracing.
+      client_id: "souls"
+
+      # Network timeout for requests (e.g., "5s", "500ms", "1m").
+      timeout: "5s"
+
+
+  # ---------------------------------------------------------------------------
+  # Staging environment
+  # ---------------------------------------------------------------------------
+  staging:
+    server: "paravon.staging.example.com:9000"
+    tls:
+      ca: "~/.para/certs/ca.pem"
+      cert: "~/.para/certs/staging-client.pem"
+      key: "~/.para/certs/staging-client-key.pem"
+    client:
+      client_id: "cli-staging"
+      timeout: "5s"
+
+
+  # ---------------------------------------------------------------------------
+  # Production environment
+  # ---------------------------------------------------------------------------
+  prod:
+    # Typically a load balancer or VIP in front of the Paravon cluster.
+    server: "para.prod.example.com:9000"
+    tls:
+      ca: "/etc/para/ca.pem"
+      cert: "/etc/para/client.pem"
+      key: "/etc/para/client-key.pem"
+    client:
+      client_id: "cli-prod"
+      timeout: "3s"
