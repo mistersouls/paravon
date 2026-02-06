@@ -39,7 +39,7 @@ async def test_routed_application_unknown_type():
 
     assert len(send.sent) == 1
     assert send.sent[0].type == "ko"
-    assert "Unknown event type" in send.sent[0].data["message"]
+    assert "Unknown message type" in send.sent[0].data["message"]
 
 
 @pytest.mark.asyncio
@@ -77,4 +77,4 @@ async def test_routed_application_handler_returns_none():
 
     await app(receive, send)
 
-    assert send.sent == []
+    assert send.sent == [Message(type='ko', data={'message': 'Empty response'})]

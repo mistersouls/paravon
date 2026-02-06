@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import struct
 
 from paravon.core.models.message import Message
 from paravon.core.ports.serializer import Serializer
@@ -46,7 +47,8 @@ class Streamer:
             await self._flow.drain()
 
         try:
-            frame = self._serializer.serialize(message.to_dict())
+            payload = self._serializer.serialize(message.to_dict())
+            frame = struct.pack("!I", len(payload)) + payload
             self._transport.write(frame)
         except Exception as exc:
             self._logger.error(f"Failed to send message: {exc}")

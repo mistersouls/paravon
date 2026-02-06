@@ -1,4 +1,6 @@
 import asyncio
+import struct
+
 import pytest
 from unittest.mock import Mock, AsyncMock
 
@@ -21,7 +23,11 @@ async def test_send_writes_to_transport(transport, serializer):
     msg = Message(type="ping", data={"a": 1})
     await streamer.send(msg)
 
-    assert transport.buffer.startswith(b"X-")
+    payload = serializer.serialize(msg.to_dict())
+    length = struct.pack("!I", len(payload))
+    expected = length + b"X-"
+
+    assert transport.buffer.startswith(expected)
     assert not transport.is_closing()
 
 
@@ -43,8 +49,12 @@ async def test_send_waits_for_flow_control(transport, serializer):
     msg = Message(type="ping", data={})
     await streamer.send(msg)
 
+    payload = serializer.serialize(msg.to_dict())
+    length = struct.pack("!I", len(payload))
+    expected = length + b"X-"
+
     flow.drain.assert_awaited_once()
-    assert transport.buffer.startswith(b"X-")
+    assert transport.buffer.startswith(expected)
 
 
 @pytest.mark.ut

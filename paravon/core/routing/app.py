@@ -33,25 +33,27 @@ class RoutedApplication:
 
     async def __call__(self, receive: ReceiveMessage, send: SendMessage) -> None:
         while True:
-            event = await receive()
-            if event is None:
+            msg = await receive()
+            if msg is None:
                 break
 
-            handler = self.router.resolve(event.type)
+            handler = self.router.resolve(msg.type)
 
             if handler is None:
-                msg = f"Unknown event type '{event.type}'"
+                msg = f"Unknown message type '{msg.type}'"
                 await send(Message(type="ko", data={"message": msg}))
                 continue
 
             try:
-                data = dict(event.data)
+                data = dict(msg.data)
                 data.setdefault("request_id", str(uuid.uuid4()))
                 result = await handler(data)
-                if result is not None:
-                    await send(result)
+                if result is None:
+                    result = Message(type="ko", data={"message": "Empty response"})
+                await send(result)
+                self._logger.debug(f"Sent message: {result}")
             except Exception as exc:
-                self._logger.error(f"Error in handler '{event.type}': {exc}", exc_info=exc)
+                self._logger.error(f"Error in handler '{msg.type}': {exc}", exc_info=exc)
                 await send(Message(type="ko", data={"message": str(exc)}))
 
     def request(self, event_type: str) -> Callable[[RouteHandler], RouteHandler]:
