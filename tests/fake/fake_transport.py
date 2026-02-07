@@ -1,14 +1,16 @@
 import asyncio
+import json
+from typing import Any
 
 
-class FakeSerializer:
+class JsonSerializer:
     @staticmethod
-    def serialize(obj):
-        return f"X-{obj}".encode()
+    def serialize(obj) -> bytes:
+        return json.dumps(obj).encode()
 
     @staticmethod
-    def deserialize(data):
-        return {"type": "ping", "data": {"v": data.decode()}}
+    def deserialize(data) -> Any:
+        return json.loads(data.decode())
 
 
 class FakeTransport(asyncio.Transport):

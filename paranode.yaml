@@ -11,6 +11,25 @@ node:
   # must not depend on ephemeral properties such as IP address or hostname.
   id: "node-1"
 
+  # [Default: L]
+  # Size class defining how many virtual slots (vnodes) this node receives
+  # when generating its vnode assignment for the first time.
+  #
+  # IMPORTANT:
+  #   - This value is used ONLY if the storage backend does NOT already contain
+  #     a persisted vnode list.
+  #   - Once a vnode list exists on disk, it becomes the authoritative source
+  #     of truth and this field is ignored.
+  #
+  # Allowed values:
+  #   XS  → 1 slot
+  #   S   → 2 slots
+  #   M   → 4 slots
+  #   L   → 8 slots
+  #   XL  → 16 slots
+  #   XXL → 32 slots
+  size: "L"
+
 
 # =====================================================================
 # Server settings (TCP + TLS)

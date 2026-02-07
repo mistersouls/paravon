@@ -4,7 +4,7 @@ import ssl
 import pytest
 import yaml
 from typing import Generator
-from tests.fake.fake_transport import FakeTransport, FakeSerializer
+from tests.fake.fake_transport import FakeTransport, JsonSerializer
 from tests.helpers import FakeParaConfig
 from tests.utils import generate_cert_pair, write_pem
 
@@ -13,7 +13,7 @@ from paravon.bootstrap.config.settings import ParavonConfig, TLSSettings
 
 @pytest.fixture
 def serializer():
-    return FakeSerializer()
+    return JsonSerializer()
 
 
 @pytest.fixture

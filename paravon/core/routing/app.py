@@ -51,7 +51,6 @@ class RoutedApplication:
                 if result is None:
                     result = Message(type="ko", data={"message": "Empty response"})
                 await send(result)
-                self._logger.debug(f"Sent message: {result}")
             except Exception as exc:
                 self._logger.error(f"Error in handler '{msg.type}': {exc}", exc_info=exc)
                 await send(Message(type="ko", data={"message": str(exc)}))

@@ -18,7 +18,7 @@ from paravon.core.transport.server import MessageServer
 class ControlPlane:
     def __init__(
         self,
-        config: ParavonConfig,
+        config: ParavonConfig, # todo(souls): break hexagonal design
         api_app: Application,
         peer_app: Application,
         serializer: Serializer,
@@ -39,7 +39,8 @@ class ControlPlane:
 
         self._meta_manager = NodeMetaManager(
             peer_config=self._peer_config,
-            system_storage=self._storage_factory.create("system")
+            system_storage=self._storage_factory.create("system"),
+            serializer=self._serializer
         )
         self._api_server = MessageServer(
             config=self._api_config,
@@ -104,6 +105,7 @@ class ControlPlane:
 
         config = PeerConfig(
             node_id=node_config.id,
+            node_size=node_config.size,
             app=self._peer_app,
             host=peer_config.host,
             port=peer_config.port,

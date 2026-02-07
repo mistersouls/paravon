@@ -5,6 +5,7 @@ import pytest
 from paravon.core.transport.server import MessageServer
 from paravon.core.models.config import ServerConfig
 from paravon.core.models.message import Message
+from tests.conftest import serializer
 
 
 @pytest.mark.it
@@ -39,7 +40,7 @@ async def test_one_client(tmp_path, serializer, mtls_contexts):
 
     reader, writer = await asyncio.open_connection(config.host, port, ssl=client_ctx)
 
-    payload = b"hello"
+    payload = serializer.serialize({"type": "greeting", "data": {"message": "hello"}})
     frame = struct.pack("!I", len(payload)) + payload
     writer.write(frame)
     await writer.drain()
@@ -52,8 +53,8 @@ async def test_one_client(tmp_path, serializer, mtls_contexts):
     assert len(received_messages) == 1
     msg = received_messages[0]
     assert isinstance(msg, Message)
-    assert msg.type == "ping"
-    assert msg.data == {"v": "hello"}
+    assert msg.type == "greeting"
+    assert msg.data == {"message": "hello"}
 
 
 @pytest.mark.it
@@ -83,8 +84,9 @@ async def test_multiple_clients(serializer, mtls_contexts):
     port = server._server.sockets[0].getsockname()[1]
 
     clients = []
-    for payload in [b"a", b"b", b"c"]:
+    for letter in ["a", "b", "c"]:
         reader, writer = await asyncio.open_connection("127.0.0.1", port, ssl=client_ctx)
+        payload = serializer.serialize({"type": "alphabet", "data": {"letter": letter}})
         frame = struct.pack("!I", len(payload)) + payload
         writer.write(frame)
         await writer.drain()
@@ -97,7 +99,7 @@ async def test_multiple_clients(serializer, mtls_contexts):
     await server.shutdown()
 
     assert len(received) == 3
-    assert sorted([m.data["v"] for m in received]) == ["a", "b", "c"]
+    assert sorted([m.data["letter"] for m in received]) == ["a", "b", "c"]
 
 
 @pytest.mark.it

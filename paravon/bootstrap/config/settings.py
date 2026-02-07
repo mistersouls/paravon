@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict, PydanticBaseSett
 from pydantic_core.core_schema import ValidationInfo
 
 from paravon.bootstrap.config.loader import get_configfile
+from paravon.core.models.membership import NodeSize
 
 
 class NodeSettings(BaseSettings):
@@ -24,6 +25,34 @@ class NodeSettings(BaseSettings):
             )
         )
     ]
+
+    size: Annotated[
+        NodeSize,
+        Field(
+            description=(
+                "Size class defining how many virtual slots (vnodes) this node receives\n"
+                "when generating its vnode assignment for the first time.\n\n"
+                "This value is used ONLY if the storage backend does not already contain\n"
+                "a persisted vnode list. Once a vnode list exists on disk, it becomes the\n"
+                "authoritative source of truth and this field is ignored.\n\n"
+                "Allowed values:\n"
+                "  XS  → 1 slot\n"
+                "  S   → 2 slots\n"
+                "  M   → 4 slots\n"
+                "  L   → 8 slots\n"
+                "  XL  → 16 slots\n"
+                "  XXL → 32 slots\n"
+            ),
+            default=NodeSize.L
+        )
+    ]
+
+    @field_validator("size", mode="before")
+    @classmethod
+    def parse_size(cls, v):
+        if isinstance(v, str):
+            return NodeSize[v]  # converts "L" → NodeSize.L
+        return v
 
 
 class ApiServerSettings(BaseModel):

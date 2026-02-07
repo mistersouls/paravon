@@ -1,5 +1,8 @@
+from typing import Any
+
 from paravon.core.models.config import PeerConfig
-from paravon.core.models.meta import NodePhase, Membership
+from paravon.core.models.membership import NodePhase, Membership, NodeSize
+from paravon.core.ports.serializer import Serializer
 from paravon.core.ports.storage import Storage
 
 
@@ -18,54 +21,76 @@ class NodeMetaManager:
     """
     _SYS_NAMESPACE = b"system"
 
-    def __init__(self, peer_config: PeerConfig, system_storage: Storage) -> None:
+    def __init__(self, peer_config: PeerConfig, system_storage: Storage, serializer: Serializer) -> None:
         self._peer_config = peer_config
         self._system_storage = system_storage
+        self._serializer = serializer
         self._membership: Membership | None = None
+        self._incarnation: int | None = None
+
+    async def bump_epoch(self) -> int:
+        """
+        Increment and persist the local membership epoch.
+
+        The epoch is a per‑node, monotonically increasing counter that tracks
+        updates to this node's membership record (phase changes, token updates,
+        capacity changes, etc.). Gossip uses this value to determine which
+        version of a node's membership is newer.
+
+        If the membership has not been initialized yet, this method creates
+        the initial epoch and triggers membership initialization.
+        """
+        if self._membership is None:
+            epoch = 1
+            await self._put("epoch", epoch)
+            await self._init_membership()
+        else:
+            epoch = self._membership.epoch + 1
+            await self._put("epoch", epoch)
+            self._membership.epoch = epoch
+
+        return epoch
+
+    async def bump_incarnation(self) -> int:
+        """
+        Increment and persist the global ring incarnation number.
+
+        The incarnation acts as a fencing token for the entire ring. Any gossip
+        state carrying an older incarnation is ignored, ensuring that outdated
+        membership information cannot be reintroduced after global operations
+        such as node removal, ring resets, or large‑scale rebalancing.
+        """
+        incarnation = await self.get_incarnation()
+        incarnation += 1
+        await self._put("incarnation", incarnation)
+        return incarnation
+
+    async def get_incarnation(self) -> int:
+        """
+        Return the persisted ring incarnation, loading it from storage if needed.
+
+        The incarnation is cached in memory after the first read. If no value
+        exists in storage, the method returns 0, representing the initial
+        incarnation of the ring.
+        """
+        if self._incarnation is None:
+            self._incarnation = await self._get("incarnation", 0)
+        return self._incarnation
 
     async def get_membership(self) -> Membership:
         """
         Loads the membership information from storage if it has not been
-        loaded yet. The method reads both the node identifier and the
-        phase from the system namespace.
+        loaded yet. The method reads the memberships meta from
+        the system namespace.
 
         If a persisted node identifier exists and differs from the
         configured PeerConfig, the method raises a RuntimeError. This
         protects the invariant that a node cannot change identity once
         initialized and prevents accidental startup with another node's
         configuration.
-
-        The method returns a Membership instance containing the resolved
-        node identifier and phase.
         """
-        if self._membership is not None:
-            return self._membership
-
-        b_node_id = await self._system_storage.get(self._SYS_NAMESPACE, b"node_id")
-        b_phase = await self._system_storage.get(self._SYS_NAMESPACE, b"phase")
-
-        node_id = b_node_id.decode() if b_node_id else None
-        phase = NodePhase(b_phase.decode()) if b_phase else NodePhase.idle
-
-        if node_id and self._peer_config.node_id != node_id:
-            raise RuntimeError(
-                f"Persisted node_id '{node_id}' does not match configured node_id "
-                f"'{self._peer_config.node_id}'. A node cannot change identity once "
-                f"initialized, and this indicates the node is starting with the "
-                f"configuration of another node."
-            )
-
-        node_id = node_id or self._peer_config.node_id
-        await self._system_storage.put(
-            self._SYS_NAMESPACE, b"node_id", node_id.encode()
-        )
-        await self._system_storage.put(
-            self._SYS_NAMESPACE, b"phase", phase.value.encode()
-        )
-        self._membership = Membership(
-            node_id=node_id,
-            phase=phase
-        )
+        if self._membership is None:
+            self._membership = await self._init_membership()
         return self._membership
 
     async def set_phase(self, phase: NodePhase) -> None:
@@ -74,11 +99,82 @@ class NodeMetaManager:
         in‑memory membership object. If the membership has not been loaded
         yet, the method triggers its initialization.
         """
-        await self._system_storage.put(
-            self._SYS_NAMESPACE, b"phase", phase.value.encode()
-        )
+        await self._put("phase", phase.name)
 
         if self._membership:
             self._membership.phase = phase
         else:
-            await self.get_membership()
+            await self._init_membership()
+
+    async def set_tokens(self, tokens: list[int]) -> None:
+        """
+        Persists the provided tokens under the 'tokens' key and updates the
+        in‑memory membership object. If the membership has not been loaded
+        yet, the method triggers its initialization.
+        """
+        await self._put("tokens", Membership.tokens_bytes(tokens))
+
+        if self._membership:
+            self._membership.tokens = tokens
+        else:
+            await self._init_membership()
+
+    async def _init_membership(self) -> Membership:
+        epoch = await self._get("epoch", 0)
+        stored_node_id = await self._get("node_id")
+        node_id = await self._validate_node_id(stored_node_id)
+        size_name = await self._get("size")
+        size = await self._validate_size(size_name)
+        phase = NodePhase(await self._get("phase", "idle"))
+        tokens = Membership.tokens_from(await self._get("tokens", []))
+
+        return Membership(
+            epoch=epoch,
+            node_id=node_id,
+            size=size,
+            phase=phase,
+            tokens=tokens,
+        )
+
+    async def _get(self, key: str, default: Any = None) -> Any:
+        value = await self._system_storage.get(self._SYS_NAMESPACE, key.encode())
+        if value is not None:
+            return self._serializer.deserialize(value)
+        return default
+
+    async def _put(self, key: str, value: Any) -> None:
+        await self._system_storage.put(
+            self._SYS_NAMESPACE,
+            key.encode(),
+            self._serializer.serialize(value)
+        )
+
+    async def _validate_node_id(self, node_id: str | None) -> str:
+        if node_id is None:
+            node_id = self._peer_config.node_id
+            await self._put("node_id", node_id)
+
+        if node_id != self._peer_config.node_id:
+            raise RuntimeError(
+                f"Persisted node_id '{node_id}' does not match configured node_id "
+                f"'{self._peer_config.node_id}'. A node cannot change identity once "
+                f"initialized, and this may indicate the node is starting with the "
+                f"configuration of another node."
+            )
+
+        return node_id
+
+    async def _validate_size(self, size_name: str | None) -> NodeSize:
+        size = self._peer_config.node_size
+        if size_name is not None:
+            stored_size = NodeSize[size_name]
+            if stored_size != size:
+                raise RuntimeError(
+                    f"Persisted node.size '{stored_size.name}' does not match "
+                    f"configured node.size '{size.name}'. Changing a node's "
+                    f"capacity class after initialization is not supported."
+                )
+        else:
+            await self._put("size", size.name)
+
+        return size

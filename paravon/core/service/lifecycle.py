@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from paravon.core.models.config import PeerConfig
-from paravon.core.models.meta import Membership, NodePhase
+from paravon.core.models.membership import Membership, NodePhase
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.node import NodeService
 from paravon.core.transport.server import MessageServer

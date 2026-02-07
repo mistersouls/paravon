@@ -25,9 +25,9 @@ async def test_send_writes_to_transport(transport, serializer):
 
     payload = serializer.serialize(msg.to_dict())
     length = struct.pack("!I", len(payload))
-    expected = length + b"X-"
+    expected = length + payload
 
-    assert transport.buffer.startswith(expected)
+    assert transport.buffer == expected
     assert not transport.is_closing()
 
 
@@ -51,10 +51,10 @@ async def test_send_waits_for_flow_control(transport, serializer):
 
     payload = serializer.serialize(msg.to_dict())
     length = struct.pack("!I", len(payload))
-    expected = length + b"X-"
+    expected = length + payload
 
     flow.drain.assert_awaited_once()
-    assert transport.buffer.startswith(expected)
+    assert transport.buffer == expected
 
 
 @pytest.mark.ut

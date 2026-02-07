@@ -2,7 +2,7 @@ from dataclasses import dataclass, asdict
 from typing import Any, Callable, Awaitable
 
 
-@dataclass
+@dataclass(order=True, slots=True, eq=True, frozen=True)
 class Message:
     """
     Internal representation of an application-level message.
