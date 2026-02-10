@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from paravon.core.connections.pool import ClientConnectionPool
 from paravon.core.gossip.table import BucketTable
 from paravon.core.models.membership import Membership
 from paravon.core.models.message import Message
@@ -16,10 +17,12 @@ class Gossiper:
         peer_state: PeerState,
         serializer: Serializer,
         meta_manager: NodeMetaManager,
+        peer_clients: ClientConnectionPool
     ) -> None:
         self._peer_state = peer_state
         self._serializer = serializer
         self._meta_manager = meta_manager
+        self._peer_clients = peer_clients
         self._inflight = asyncio.Semaphore(32)
         self._lock = asyncio.Lock()
         self._table = BucketTable(
@@ -36,11 +39,14 @@ class Gossiper:
         rate_limiter: RateLimiter
     ) -> None:
         membership = await self._meta_manager.get_membership()
+        self._peer_clients.subscribe("gossip/buckets", self)
         await self._table.add_or_update(membership)
         await self.gossip_loop(stop_event, rate_limiter)
 
-    async def handle(self, message: Message) -> None:
-        ...
+    @staticmethod
+    async def handle(message: Message) -> None:
+        # stub
+        print(message)
 
     async def gossip_loop(
         self,
@@ -76,7 +82,6 @@ class Gossiper:
         return peer
 
     async def send_checksums(self, peer: Membership) -> None:
-        # stub
         async with self._inflight:
             self._logger.debug(f"Gossiping peer {peer.node_id}")
             source = await self._meta_manager.get_membership()
@@ -97,6 +102,9 @@ class Gossiper:
             self._logger.error(f"Failed to gossip {peer.node_id}: {ex}")
             rate_limiter.on_error()
 
-    @staticmethod
-    async def _send_message(peer: Membership, event: Message) -> None:
-        await asyncio.sleep(0.02)
+    async def _send_message(self, peer: Membership, message: Message) -> None:
+        node_id = peer.node_id
+        address = peer.peer_address
+        if not self._peer_clients.has(node_id):
+            await self._peer_clients.register(node_id, address)
+        await self._peer_clients.send(node_id, message)

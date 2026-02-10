@@ -3,6 +3,7 @@ from paravon.core.models.message import Message
 from paravon.core.routing.router import Router
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_router_register_and_resolve():
     router = Router()
@@ -20,6 +21,7 @@ async def test_router_register_and_resolve():
     assert result.data == {"x": 1}
 
 
+@pytest.mark.ut
 def test_router_duplicate_registration():
     router = Router()
 
@@ -33,6 +35,7 @@ def test_router_duplicate_registration():
             ...
 
 
+@pytest.mark.ut
 def test_router_routes_returns_copy():
     router = Router()
 

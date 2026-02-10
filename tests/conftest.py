@@ -136,7 +136,8 @@ def meta_manager():
         node_id="local",
         tokens=[1],
         phase=NodePhase.ready,
-        size=NodeSize.XS
+        size=NodeSize.XS,
+        peer_address="1.2.3.4:6000",
     )
     mm.get_membership.return_value = m
     return mm

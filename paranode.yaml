@@ -50,10 +50,10 @@ server:
     # Host/IP on which the inter-node server listens.
     host: "127.0.0.1"
 
-    # [Default: 12000]
+    # [Default: 6000]
     # TCP port used for inter-node communication:
     # join, leave, sync/view, replication, handoff, partition transfers.
-    port: 12000
+    port: 6000
 
     # [Default: []]
     # List of seed node addresses (host:port) used during bootstrap.
@@ -63,6 +63,12 @@ server:
     # Seeds are only used during bootstrap. After join, the node no longer
     # depends on them.
     seeds: []
+
+    # [Optional]
+    # Reachable address (host:port) advertised to other nodes.
+    # This is the canonical address peers will use to contact this node.
+    # If omitted, defaults to '<server.peer.host>:<server.peer.port>'.
+    listener: "127.0.0.1:6000"
 
   tls:
     # [Required]

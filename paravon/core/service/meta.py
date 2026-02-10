@@ -135,6 +135,7 @@ class NodeMetaManager:
         size = await self._validate_size(size_name)
         phase = NodePhase(await self._get("phase", "idle"))
         tokens = Membership.tokens_from(await self._get("tokens", []))
+        peer_address = self._get_peer_address()
 
         return Membership(
             epoch=epoch,
@@ -143,6 +144,7 @@ class NodeMetaManager:
             size=size,
             phase=phase,
             tokens=tokens,
+            peer_address=peer_address
         )
 
     async def _get(self, key: str, default: Any = None) -> Any:
@@ -187,3 +189,12 @@ class NodeMetaManager:
             await self._put("size", size.name)
 
         return size
+
+    def _get_peer_address(self) -> str:
+        listener = self._peer_config.peer_listener
+        if listener is None:
+            host = self._peer_config.host
+            port = self._peer_config.port
+            listener = f"{host}:{port}"
+
+        return listener

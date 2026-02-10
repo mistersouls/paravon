@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from paravon.core.connections.pool import ClientConnectionPool
 from paravon.core.gossip.gossiper import Gossiper
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import PeerConfig
@@ -37,6 +38,11 @@ class LifecycleService:
 
         self._spawner = TaskSpawner(loop=self._loop)
         self._peer_state = PeerState(spawner=self._spawner)
+        self._peer_clients = ClientConnectionPool(
+            serializer=self._serializer,
+            spawner=self._spawner,
+            ssl_context=self._peer_config.client_ssl_ctx
+        )
         self._logger = logging.getLogger("core.service.lifecycle")
 
     async def start(self, stop_event) -> None:
@@ -54,6 +60,11 @@ class LifecycleService:
         await self.start_gossip(stop_event)
         self._logger.info("Started Gossip service")
 
+        self._spawner.spawn(
+            self._peer_clients.dispatch_forever(stop_event)
+        )
+        self._logger.info("Started dispatch loop for incoming peer messages")
+
     async def stop(self) -> None:
         if self._api_server.running:
             self._logger.info("Shutting down API server.")
@@ -66,6 +77,9 @@ class LifecycleService:
             await self._peer_server.shutdown()
         else:
             self._logger.info("Peer server is not running, skip shutting down.")
+
+        self._logger.info("Closing Peer clients")
+        await self._peer_clients.close()
 
         while remaining := self._spawner.remaining_tasks:
             self._logger.info(f"Waiting for {remaining} background tasks to complete.")
@@ -127,6 +141,7 @@ class LifecycleService:
             peer_state=self._peer_state,
             serializer=self._serializer,
             meta_manager=self._meta_manager,
+            peer_clients=self._peer_clients,
         )
         cubic_controller = CubicRateController()
         rate_limiter = CubicRateLimiter(controller=cubic_controller)

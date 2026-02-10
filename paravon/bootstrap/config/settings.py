@@ -86,7 +86,7 @@ class PeerServerSettings(BaseModel):
         int,
         Field(
             description="TCP port for inter-node communication.",
-            default=12000
+            default=6000
         )
     ]
 
@@ -98,6 +98,17 @@ class PeerServerSettings(BaseModel):
                 "Seeds are only used at startup to obtain membership and ring layout."
             ),
             default_factory=list
+        )
+    ]
+
+    listener: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Reachable address (host:port) advertised to other nodes.\n"
+                "Defaults to '<host>:<port>' if omitted."
+            ),
+            default=None
         )
     ]
 

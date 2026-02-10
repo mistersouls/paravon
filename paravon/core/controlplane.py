@@ -29,10 +29,13 @@ class ControlPlane:
         self._peer_app = peer_app
         self._loop = self._create_event_loop()
         self._server_ssl_ctx = self._config.get_server_ssl_ctx()
+        self._client_ssl_ctx = self._config.get_client_ssl_ctx()
         self._serializer = serializer
         self._storage_factory = storage_factory
         self._api_config = self._build_api_config(self._server_ssl_ctx)
-        self._peer_config = self._build_peer_config(self._server_ssl_ctx)
+        self._peer_config = self._build_peer_config(
+            self._server_ssl_ctx, self._client_ssl_ctx
+        )
         self._background_tasks: set[asyncio.Task] = set()
 
         self._logger = logging.getLogger("paravon.controlplane")
@@ -99,7 +102,11 @@ class ControlPlane:
 
         return config
 
-    def _build_peer_config(self, server_ctx: ssl.SSLContext) -> PeerConfig:
+    def _build_peer_config(
+        self,
+        server_ctx: ssl.SSLContext,
+        client_ctx: ssl.SSLContext,
+    ) -> PeerConfig:
         server_config = self._config.server
         peer_config = server_config.peer
         node_config = self._config.node
@@ -116,7 +123,9 @@ class ControlPlane:
             max_buffer_size=server_config.max_buffer_size,
             max_message_size=server_config.max_message_size,
             timeout_graceful_shutdown=server_config.timeout_graceful_shutdown,
-            seeds=set(peer_config.seeds)
+            seeds=set(peer_config.seeds),
+            peer_listener=peer_config.listener,
+            client_ssl_ctx=client_ctx
         )
 
         return config

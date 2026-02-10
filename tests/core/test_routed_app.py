@@ -5,6 +5,7 @@ from paravon.core.routing.app import RoutedApplication
 from tests.fake.fake_send_receive import FakeReceiveMessage, FakeSendMessage
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_routed_application_dispatch():
     app = RoutedApplication()
@@ -26,6 +27,7 @@ async def test_routed_application_dispatch():
     assert "request_id" in send.sent[0].data
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_routed_application_unknown_type():
     app = RoutedApplication()
@@ -42,6 +44,7 @@ async def test_routed_application_unknown_type():
     assert "Unknown message type" in send.sent[0].data["message"]
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_routed_application_handler_exception():
     app = RoutedApplication()
@@ -62,6 +65,7 @@ async def test_routed_application_handler_exception():
     assert send.sent[0].data["message"] == "boom!"
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_routed_application_handler_returns_none():
     app = RoutedApplication()

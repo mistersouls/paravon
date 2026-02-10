@@ -71,3 +71,6 @@ class PeerConfig(ServerConfig):
     node_id: str
     node_size: NodeSize
     seeds: set[str]
+    peer_listener: str
+    client_ssl_ctx: ssl.SSLContext
+

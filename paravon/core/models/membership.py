@@ -104,6 +104,9 @@ class Membership:
     internally but serialized as fixed‑width 16‑byte big‑endian
     values to ensure compact and deterministic gossip propagation.
     """
+
+    peer_address: str
+
     def is_remove_phase(self) -> bool:
         return self.phase in (NodePhase.idle, NodePhase.draining)
 

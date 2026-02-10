@@ -23,8 +23,10 @@ def peer_config():
         port=0,
         app=RoutedApplication(),
         ssl_ctx=ssl.create_default_context(),
+        client_ssl_ctx=ssl.create_default_context(),
         backlog=120,
-        seeds=set()
+        seeds=set(),
+        peer_listener="127.0.0.1:0",
     )
 
 

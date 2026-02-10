@@ -128,5 +128,6 @@ def make_member(node_id, epoch=1, incarnation=1):
         node_id=node_id,
         tokens=[1, 2, 3, 4, 5, 6, 7, 8],
         phase=NodePhase.ready,
-        size=NodeSize.L
+        size=NodeSize.L,
+        peer_address="1.2.3.4:6000"
     )
