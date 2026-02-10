@@ -1,7 +1,7 @@
 import asyncio
 
 from paravon.core.models.message import Message
-from paravon.core.models.meta import Membership, NodePhase
+from paravon.core.models.membership import Membership
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.transport.server import MessageServer
 

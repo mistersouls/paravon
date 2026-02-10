@@ -63,7 +63,7 @@ async def test_data_received_single_complete_frame(config, server_state, seriali
     proto._streamer.queue = Mock()
     proto._streamer.queue.put_nowait = Mock()
 
-    payload = b"hello"
+    payload = serializer.serialize({"type": "greeting", "data": {"message": "hello"}})
     frame = struct.pack("!I", len(payload)) + payload
 
     proto.data_received(frame)
@@ -71,7 +71,7 @@ async def test_data_received_single_complete_frame(config, server_state, seriali
     proto._streamer.queue.put_nowait.assert_called_once()
     msg = proto._streamer.queue.put_nowait.call_args[0][0]
     assert isinstance(msg, Message)
-    assert msg.type == "ping"
+    assert msg.type == "greeting"
 
 
 @pytest.mark.ut
@@ -145,21 +145,22 @@ async def test_data_received_buffer_overflow(config, server_state, serializer, t
 
 @pytest.mark.ut
 @pytest.mark.asyncio
-async def test_data_received_invalid_frame_is_skipped(config, server_state, serializer, transport):
+async def test_data_received_invalid_frame_is_ko(config, server_state, serializer, transport):
     proto = Protocol(config, server_state, serializer)
     proto.connection_made(transport)
 
-    proto._serializer.deserialize = Mock(side_effect=ValueError("bad"))
-
     proto._streamer.queue = Mock()
     proto._streamer.queue.put_nowait = Mock()
+    mock_put_nowait = proto._streamer.queue.put_nowait
 
     payload = b"hello"
     frame = struct.pack("!I", len(payload)) + payload
 
     proto.data_received(frame)
 
-    proto._streamer.queue.put_nowait.assert_not_called()
+    mock_put_nowait.assert_called_once()
+    msg = mock_put_nowait.call_args.args[0]
+    assert msg == Message(type="ko", data={"message": "Invalid frame format"})
 
 
 @pytest.mark.ut

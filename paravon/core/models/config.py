@@ -1,6 +1,7 @@
 import ssl
 from dataclasses import dataclass
 
+from paravon.core.models.membership import NodeSize
 from paravon.core.transport.application import Application
 
 
@@ -68,4 +69,8 @@ class ServerConfig:
 @dataclass(kw_only=True)
 class PeerConfig(ServerConfig):
     node_id: str
+    node_size: NodeSize
     seeds: set[str]
+    peer_listener: str
+    client_ssl_ctx: ssl.SSLContext
+

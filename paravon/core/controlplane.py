@@ -18,7 +18,7 @@ from paravon.core.transport.server import MessageServer
 class ControlPlane:
     def __init__(
         self,
-        config: ParavonConfig,
+        config: ParavonConfig, # todo(souls): break hexagonal design
         api_app: Application,
         peer_app: Application,
         serializer: Serializer,
@@ -29,17 +29,21 @@ class ControlPlane:
         self._peer_app = peer_app
         self._loop = self._create_event_loop()
         self._server_ssl_ctx = self._config.get_server_ssl_ctx()
+        self._client_ssl_ctx = self._config.get_client_ssl_ctx()
         self._serializer = serializer
         self._storage_factory = storage_factory
         self._api_config = self._build_api_config(self._server_ssl_ctx)
-        self._peer_config = self._build_peer_config(self._server_ssl_ctx)
+        self._peer_config = self._build_peer_config(
+            self._server_ssl_ctx, self._client_ssl_ctx
+        )
         self._background_tasks: set[asyncio.Task] = set()
 
         self._logger = logging.getLogger("paravon.controlplane")
 
         self._meta_manager = NodeMetaManager(
             peer_config=self._peer_config,
-            system_storage=self._storage_factory.create("system")
+            system_storage=self._storage_factory.create("system"),
+            serializer=self._serializer
         )
         self._api_server = MessageServer(
             config=self._api_config,
@@ -61,7 +65,8 @@ class ControlPlane:
             api_server=self._api_server,
             peer_server=self._peer_server,
             peer_config=self._peer_config,
-            meta_manager=self._meta_manager
+            meta_manager=self._meta_manager,
+            serializer=self._serializer
         )
 
     def build_core(self) -> ParaCore:
@@ -97,13 +102,18 @@ class ControlPlane:
 
         return config
 
-    def _build_peer_config(self, server_ctx: ssl.SSLContext) -> PeerConfig:
+    def _build_peer_config(
+        self,
+        server_ctx: ssl.SSLContext,
+        client_ctx: ssl.SSLContext,
+    ) -> PeerConfig:
         server_config = self._config.server
         peer_config = server_config.peer
         node_config = self._config.node
 
         config = PeerConfig(
             node_id=node_config.id,
+            node_size=node_config.size,
             app=self._peer_app,
             host=peer_config.host,
             port=peer_config.port,
@@ -113,7 +123,9 @@ class ControlPlane:
             max_buffer_size=server_config.max_buffer_size,
             max_message_size=server_config.max_message_size,
             timeout_graceful_shutdown=server_config.timeout_graceful_shutdown,
-            seeds=set(peer_config.seeds)
+            seeds=set(peer_config.seeds),
+            peer_listener=peer_config.listener,
+            client_ssl_ctx=client_ctx
         )
 
         return config

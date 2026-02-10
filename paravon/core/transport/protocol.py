@@ -125,9 +125,6 @@ class Protocol(asyncio.Protocol):
             self._expected_length = None
 
             msg = self._decode_message(payload)
-            if msg is None:
-                continue
-
             try:
                 self._streamer.queue.put_nowait(msg)
             except Exception as exc:
@@ -143,10 +140,10 @@ class Protocol(asyncio.Protocol):
     def shutdown(self) -> None:
         self._transport.close()
 
-    def _decode_message(self, frame: bytes) -> Message | None:
+    def _decode_message(self, frame: bytes) -> Message:
         try:
             payload = self._serializer.deserialize(frame)
             return Message(**payload)
         except Exception as exc:
             self._logger.warning(f"Invalid frame format: {exc}")
-            return None
+            return Message(type="ko", data={"message": "Invalid frame format"})
