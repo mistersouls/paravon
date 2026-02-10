@@ -93,6 +93,13 @@ class NodeMetaManager:
             self._membership = await self._init_membership()
         return self._membership
 
+    async def set_incarnation(self, inc: int) -> None:
+        await self._put("incarnation", inc)
+        if self._membership:
+            self._membership.incarnation = inc
+        else:
+            await self._init_membership()
+
     async def set_phase(self, phase: NodePhase) -> None:
         """
         Persists the provided phase under the 'phase' key and updates the
@@ -121,6 +128,7 @@ class NodeMetaManager:
 
     async def _init_membership(self) -> Membership:
         epoch = await self._get("epoch", 0)
+        incarnation = await self._get("incarnation", 0)
         stored_node_id = await self._get("node_id")
         node_id = await self._validate_node_id(stored_node_id)
         size_name = await self._get("size")
@@ -130,6 +138,7 @@ class NodeMetaManager:
 
         return Membership(
             epoch=epoch,
+            incarnation=incarnation,
             node_id=node_id,
             size=size,
             phase=phase,

@@ -48,6 +48,29 @@ class Membership:
     membership information across the cluster.
     """
 
+    incarnation: int
+    """
+    Ring‑wide logical generation counter maintained locally by each peer.
+
+    Unlike `epoch`, which versions an individual node’s membership record,
+    `incarnation` represents the global “generation” of the ring’s state.
+    Each peer maintains its own local incarnation as:
+
+        incarnation = max(membership.epoch for all known nodes )
+
+    This value increases whenever any node in the cluster publishes a newer
+    membership epoch. It provides a monotonic, ring‑level notion of time
+    that allows peers to:
+
+    - detect when the overall ring has advanced to a newer generation,
+    - invalidate stale views of the ring,
+    - coordinate transitions that depend on global ordering rather than
+      per‑node updates.
+
+    Because it is derived from the maximum observed epoch, `incarnation`
+    never decreases and converges naturally across all peers through gossip.
+    """
+
     node_id: str
     """
     A stable identifier for the node within the cluster.
@@ -81,6 +104,8 @@ class Membership:
     internally but serialized as fixed‑width 16‑byte big‑endian
     values to ensure compact and deterministic gossip propagation.
     """
+    def is_remove_phase(self) -> bool:
+        return self.phase in (NodePhase.idle, NodePhase.draining)
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -93,6 +118,7 @@ class Membership:
         tokens = [t.to_bytes(16, "big") for t in self.tokens]
 
         return {
+            "incarnation": self.incarnation,
             "epoch": self.epoch,
             "node_id": self.node_id,
             "size": self.size.name,
@@ -116,6 +142,7 @@ class Membership:
             phase = NodePhase(phase)
 
         return cls(
+            incarnation=data["incarnation"],
             epoch=data["epoch"],
             node_id=data["node_id"],
             size=size,

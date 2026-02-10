@@ -62,7 +62,8 @@ class ControlPlane:
             api_server=self._api_server,
             peer_server=self._peer_server,
             peer_config=self._peer_config,
-            meta_manager=self._meta_manager
+            meta_manager=self._meta_manager,
+            serializer=self._serializer
         )
 
     def build_core(self) -> ParaCore:

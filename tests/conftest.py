@@ -1,9 +1,13 @@
 import os
 import ssl
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
 from typing import Generator
+
+from paravon.core.gossip.table import BucketTable
+from paravon.core.models.membership import Membership, NodePhase, NodeSize
 from tests.fake.fake_transport import FakeTransport, JsonSerializer
 from tests.helpers import FakeParaConfig
 from tests.utils import generate_cert_pair, write_pem
@@ -116,3 +120,33 @@ def mtls_contexts(tmp_path_factory, tls_settings, para_config):
     client_ctx.load_verify_locations(cafile=client_tls.cafile)
 
     return server_ctx, client_ctx
+
+
+@pytest.fixture
+def meta_manager():
+    mm = AsyncMock()
+    mm.get_membership = AsyncMock()
+    mm.set_incarnation = AsyncMock()
+    mm.bump_incarnation = AsyncMock()
+
+    # Default local membership
+    m = Membership(
+        epoch=1,
+        incarnation=1,
+        node_id="local",
+        tokens=[1],
+        phase=NodePhase.ready,
+        size=NodeSize.XS
+    )
+    mm.get_membership.return_value = m
+    return mm
+
+
+@pytest.fixture
+def table(meta_manager, serializer):
+    return BucketTable(
+        total_buckets=8,
+        serializer=serializer,
+        meta_manager=meta_manager,
+        delta=3
+    )

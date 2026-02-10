@@ -1,16 +1,45 @@
 import asyncio
 import json
+import base64
 from typing import Any
+
+from paravon.core.models.membership import Membership
+
+
+class FakeJSONEncoder(json.JSONEncoder):
+    """
+    JSON encoder that supports:
+    - bytes (encoded as base64)
+    - objects exposing to_dict()
+    """
+
+    def default(self, obj):
+        if isinstance(obj, bytes):
+            return {"__bytes__": base64.b64encode(obj).decode()}
+        return super().default(obj)
 
 
 class JsonSerializer:
     @staticmethod
-    def serialize(obj) -> bytes:
-        return json.dumps(obj).encode()
+    def hook_factory(classes: dict[str, type]):
+        def hook(obj):
+            if "__bytes__" in obj:
+                return base64.b64decode(obj["__bytes__"])
+
+            return obj
+
+        return hook
 
     @staticmethod
-    def deserialize(data) -> Any:
-        return json.loads(data.decode())
+    def serialize(obj) -> bytes:
+        return json.dumps(obj, cls=FakeJSONEncoder).encode()
+
+    @classmethod
+    def deserialize(cls, data) -> Any:
+        return json.loads(
+            data.decode(),
+            object_hook=cls.hook_factory({"Membership": Membership}),
+        )
 
 
 class FakeTransport(asyncio.Transport):
