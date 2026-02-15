@@ -26,7 +26,6 @@ class NodeMetaManager:
         self._system_storage = system_storage
         self._serializer = serializer
         self._membership: Membership | None = None
-        self._incarnation: int | None = None
 
     async def bump_epoch(self) -> int:
         """
@@ -60,22 +59,16 @@ class NodeMetaManager:
         membership information cannot be reintroduced after global operations
         such as node removal, ring resets, or large‑scale rebalancing.
         """
-        incarnation = await self.get_incarnation()
-        incarnation += 1
-        await self._put("incarnation", incarnation)
+        if self._membership is None:
+            incarnation = 1
+            await self._put("incarnation", incarnation)
+            await self._init_membership()
+        else:
+            incarnation = self._membership.incarnation + 1
+            await self._put("incarnation", incarnation)
+            self._membership.incarnation = incarnation
+
         return incarnation
-
-    async def get_incarnation(self) -> int:
-        """
-        Return the persisted ring incarnation, loading it from storage if needed.
-
-        The incarnation is cached in memory after the first read. If no value
-        exists in storage, the method returns 0, representing the initial
-        incarnation of the ring.
-        """
-        if self._incarnation is None:
-            self._incarnation = await self._get("incarnation", 0)
-        return self._incarnation
 
     async def get_membership(self) -> Membership:
         """
@@ -94,11 +87,18 @@ class NodeMetaManager:
         return self._membership
 
     async def set_incarnation(self, inc: int) -> None:
-        await self._put("incarnation", inc)
-        if self._membership:
-            self._membership.incarnation = inc
-        else:
+        if not self._membership:
             await self._init_membership()
+
+        local_inc = self._membership.incarnation
+        if local_inc > inc:
+            raise ValueError(
+                "Cannot set incarnation to less than current "
+                f"incarnation={local_inc}"
+            )
+
+        await self._put("incarnation", inc)
+        self._membership.incarnation = inc
 
     async def set_phase(self, phase: NodePhase) -> None:
         """

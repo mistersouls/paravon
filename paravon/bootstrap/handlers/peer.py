@@ -27,3 +27,9 @@ async def remove(data: dict) -> Message:
 async def gossip_checksums(data: dict) -> Message:
     core = get_core()
     return await core.node.apply_checksums(data)
+
+
+@app.request("gossip/bucket")
+async def gossip_bucket(data: dict) -> Message:
+    core = get_core()
+    return await core.node.apply_bucket(data)

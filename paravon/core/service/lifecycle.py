@@ -90,40 +90,13 @@ class LifecycleService:
     async def bootstrap(self, membership: Membership) -> None:
         await self._peer_server.start()
         self._logger.info("Peer server started at %s:%d", *self._peer_server.listen)
-        await self.bootstrap_node(membership)
+        await self._node_service.bootstrap_node(membership)
         self._logger.info("Node initialized in bootstrap mode")
         await self._api_server.start()
         self._logger.info("API server started at %s:%d", *self._api_server.listen)
         self._logger.info(
             "Node in standalone mode is now fully operational (PEER + API)."
         )
-
-    async def bootstrap_node(self, membership: Membership) -> None:
-        node_id = membership.node_id
-        size = membership.size.value
-        phase = membership.phase
-        tokens = membership.tokens
-
-        if not tokens:
-            tokens = HashSpace.generate_tokens(node_id, size)
-            if phase != NodePhase.idle:
-                self._logger.warning(
-                    f"Expected local membership to have tokens "
-                    f"when phase={phase}, but empty."
-                )
-            await self._meta_manager.bump_epoch()
-            await self._meta_manager.set_tokens(list(tokens))
-            self._logger.info(f"Created Vnodes for node with {membership.size}")
-
-        if phase != NodePhase.ready:
-            await self._meta_manager.bump_epoch()
-            await self._meta_manager.set_phase(NodePhase.ready)
-            self._logger.info(f"Set local membership phase to ready from {phase}.")
-        else:
-            self._logger.debug("Local membership is ready, skip persisting phase.")
-
-        await self._topology.add_membership(membership)
-        self._logger.info(f"Added Local membership {node_id} to the ring.")
 
     async def start_normal(self, stop_event: asyncio.Event, membership: Membership) -> None:
         self._logger.debug("Starting Peer server.")

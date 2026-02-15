@@ -20,7 +20,8 @@ async def test_add_or_update_inserts_membership(table, meta_manager):
 
     assert "node-1" in bucket.memberships
     assert table._views["node-1"] == bucket_id
-    meta_manager.bump_incarnation.assert_awaited()
+
+    meta_manager.set_incarnation.assert_awaited()
 
 
 @pytest.mark.ut
@@ -47,7 +48,8 @@ async def test_remove_deletes_membership(table, meta_manager):
     bucket_id = table.bucket_for("node-1")
     assert "node-1" not in table.buckets[bucket_id].memberships
     assert "node-1" not in table._views
-    meta_manager.bump_incarnation.assert_awaited()
+
+    meta_manager.set_incarnation.assert_awaited()
 
 
 @pytest.mark.ut
@@ -63,21 +65,6 @@ def test_checksums_invalidate_on_change(table):
     table._mark_dirty()
     c2 = table.get_checksums()
     assert c1 is not c2
-
-
-@pytest.mark.ut
-@pytest.mark.asyncio
-async def test_peek_random_member_returns_member(table):
-    m = make_member("node-1")
-    await table.add_or_update(m)
-
-    picked = table.peek_random_member()
-    assert picked.node_id == "node-1"
-
-
-@pytest.mark.ut
-def test_peek_random_member_empty(table):
-    assert table.peek_random_member() is None
 
 
 @pytest.mark.ut

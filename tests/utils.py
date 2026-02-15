@@ -121,12 +121,12 @@ def write_pem(obj, path: Path) -> None:
     path.write_bytes(data)
 
 
-def make_member(node_id, epoch=1, incarnation=1):
+def make_member(node_id, tokens=None, epoch=1, incarnation=1):
     return Membership(
         epoch=epoch,
         incarnation=incarnation,
         node_id=node_id,
-        tokens=[1, 2, 3, 4, 5, 6, 7, 8],
+        tokens=tokens or [1, 2, 3, 4, 5, 6, 7, 8],
         phase=NodePhase.ready,
         size=NodeSize.L,
         peer_address="1.2.3.4:6000"

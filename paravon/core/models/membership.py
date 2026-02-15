@@ -27,6 +27,7 @@ class NodePhase(StrEnum):
     joining = "joining"
     draining = "draining"
     ready = "ready"
+    failed = "failed"
 
 
 @dataclass
@@ -116,10 +117,6 @@ class Membership:
         Tokens are stored as fixed‑width 16‑byte values to minimize overhead and
         ensure deterministic encoding across nodes.
         """
-        # tokens are 128‑bit values; we convert them to bytes
-        # to make them more compact for gossip
-        tokens = [t.to_bytes(16, "big") for t in self.tokens]
-
         return {
             "incarnation": self.incarnation,
             "epoch": self.epoch,

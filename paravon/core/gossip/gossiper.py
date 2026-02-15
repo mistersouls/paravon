@@ -35,16 +35,33 @@ class Gossiper:
         rate_limiter: RateLimiter
     ) -> None:
         self._peer_clients.subscribe("gossip/checksums", self)
+        self._peer_clients.subscribe("gossip/bucket", self)
         await self.gossip_loop(stop_event, rate_limiter)
+
+    async def apply_bucket(self, data: dict) -> dict[str, Membership]:
+        bucket_id = data["bucket_id"]
+        r_memberships = [
+            Membership.from_dict(m)
+            for m in data["memberships"].values()
+        ]
+        l_memberships = await self._topology.get_bucket_memberships(bucket_id)
+        await self._topology.apply_bucket(bucket_id, r_memberships)
+        return l_memberships
 
     async def apply_checksums(self, data: dict) -> dict[str, int]:
         local = await self._topology.get_checksums()
         remote_checksums = data["checksums"]
+        peer = Membership.from_dict(data["source"])
+        client = await self._get_client(peer)
 
         for bucket_id, remote_crc in remote_checksums.items():
             local_crc = local.get(bucket_id)
-            if local_crc != remote_crc:
-                self._logger.debug(f"Checksum mismatch for bucket {bucket_id}")
+            if local_crc != remote_crc and remote_crc != 0:
+                self._logger.debug(
+                    f"Checksum for bucket {bucket_id} is different, "
+                    "schedule requesting memberships"
+                )
+                self._spawner.spawn(self.request_bucket(client, bucket_id))
 
         return local
 
@@ -52,6 +69,8 @@ class Gossiper:
         match message.type:
             case "gossip/checksums":
                 await self.apply_checksums(message.data)
+            case "gossip/bucket":
+                await self.apply_bucket(message.data)
 
     async def gossip_loop(
         self,
@@ -97,14 +116,29 @@ class Gossiper:
             message = Message(type="gossip/checksums", data=data)
             await client.send(message)
 
+    async def request_bucket(self, client: ClientConnection, bucket_id: str) -> None:
+        membership = await self._meta_manager.get_membership()
+        l_memberships = await self._topology.get_bucket_memberships(bucket_id)
+        message = Message(
+            type="gossip/bucket",
+            data={
+                "bucket_id": bucket_id,
+                "source": membership.to_dict(),
+                "memberships": {
+                    m.node_id: m.to_dict()
+                    for m in l_memberships.values()
+                }
+            }
+        )
+        await client.send(message)
+
     async def _attempt_gossip(
         self,
         peer: Membership,
         rate_limiter: RateLimiter
     ) -> None:
         try:
-            await self._peer_clients.register(peer.node_id, peer.peer_address)
-            client = await self._peer_clients.get(peer.node_id)
+            client = await self._get_client(peer)
             self._logger.debug(f"Gossiping peer {peer.node_id}")
             await self.send_checksums(client)
             self._logger.debug(f"Sent gossip checksums to {peer.node_id}")
@@ -113,3 +147,7 @@ class Gossiper:
             self._logger.error(f"Failed to gossip {peer.node_id}: {ex}")
             rate_limiter.on_error()
 
+    async def _get_client(self, peer: Membership) -> ClientConnection:
+        await self._peer_clients.register(peer.node_id, peer.peer_address)
+        client = await self._peer_clients.get(peer.node_id)
+        return client
