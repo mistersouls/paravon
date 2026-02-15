@@ -21,3 +21,9 @@ async def drain(data: dict) -> Message:
 async def remove(data: dict) -> Message:
     core = get_core()
     return await core.node.remove()
+
+
+@app.request("gossip/checksums")
+async def gossip_checksums(data: dict) -> Message:
+    core = get_core()
+    return await core.node.apply_checksums(data)

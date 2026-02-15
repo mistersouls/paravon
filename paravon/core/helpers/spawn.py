@@ -38,15 +38,21 @@ class TaskSpawner:
         If the task raised an exception, it is logged. The task is then removed
         from the internal tracking set.
         """
-        if ex := task.exception():
-            self._logger.error(
-                f"Error occurred in task {task.get_name()}: {str(ex)}",
-                exc_info=ex
-            )
+        try:
+            ex = task.exception()
+            if ex:
+                if isinstance(ex, asyncio.CancelledError):
+                    self._logger.error(
+                        f"Error occurred in task {task.get_name()}: {str(ex)}",
+                        exc_info=ex
+                    )
+
+        except asyncio.CancelledError:
+            pass
 
         self._tasks.discard(task)
 
-    def spawn(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[Any]:
+    def spawn(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
         """
         Spawn a coroutine as a background task and track its lifecycle.
 

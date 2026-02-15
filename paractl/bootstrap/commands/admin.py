@@ -14,7 +14,7 @@ def admin_join(client: ParavonClient, *_) -> Message:
 
 @cli.command("admin", "drain")
 def admin_drain(client: ParavonClient, *_) -> Message:
-    req = Message(type="join", data={})
+    req = Message(type="drain", data={})
     return client.request(req)
 
 

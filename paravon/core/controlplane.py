@@ -3,7 +3,10 @@ import logging
 import ssl
 
 from paravon.bootstrap.config.settings import ParavonConfig
+from paravon.core.connections.pool import ClientConnectionPool
 from paravon.core.facade import ParaCore
+from paravon.core.gossip.gossiper import Gossiper
+from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import ServerConfig, PeerConfig
 from paravon.core.ports.serializer import Serializer
 from paravon.core.ports.storage import StorageFactory
@@ -11,6 +14,7 @@ from paravon.core.service.lifecycle import LifecycleService
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.node import NodeService
 from paravon.core.service.storage import StorageService
+from paravon.core.service.topology import TopologyManager
 from paravon.core.transport.application import Application
 from paravon.core.transport.server import MessageServer
 
@@ -55,9 +59,32 @@ class ControlPlane:
             serializer=self._serializer,
             loop=self._loop,
         )
+        self._spawner = TaskSpawner(loop=self._loop)
+        self._topology_manager = TopologyManager(
+            meta_manager=self._meta_manager,
+            serializer=self._serializer,
+        )
+        self._peer_clients = ClientConnectionPool(
+            serializer=self._serializer,
+            spawner=self._spawner,
+            ssl_context=self._peer_config.client_ssl_ctx
+        )
+        self._gossiper = Gossiper(
+            spawner=self._spawner,
+            serializer=self._serializer,
+            meta_manager=self._meta_manager,
+            peer_clients=self._peer_clients,
+            topology_manager=self._topology_manager
+        )
         self._node_service = NodeService(
             api_server=self._api_server,
             meta_manager=self._meta_manager,
+            peer_config=self._peer_config,
+            serializer=self._serializer,
+            topology_manager=self._topology_manager,
+            gossiper=self._gossiper,
+            spawner=self._spawner,
+            loop=self._loop,
         )
         self._storage_service = StorageService()
         self._lifecycle_service = LifecycleService(
@@ -66,7 +93,11 @@ class ControlPlane:
             peer_server=self._peer_server,
             peer_config=self._peer_config,
             meta_manager=self._meta_manager,
-            serializer=self._serializer
+            spawner=self._spawner,
+            gossiper=self._gossiper,
+            peer_clients=self._peer_clients,
+            serializer=self._serializer,
+            topology_manager=self._topology_manager
         )
 
     def build_core(self) -> ParaCore:

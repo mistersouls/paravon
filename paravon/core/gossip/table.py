@@ -1,8 +1,7 @@
 import hashlib
-import random
 
 from paravon.core.gossip.bucket import Bucket
-from paravon.core.models.membership import Membership
+from paravon.core.models.membership import Membership, MembershipChange, MembershipDiff
 from paravon.core.ports.serializer import Serializer
 from paravon.core.service.meta import NodeMetaManager
 
@@ -54,7 +53,6 @@ class BucketTable:
 
         bucket_id = self.bucket_for(membership.node_id)
         bucket = self.buckets[bucket_id]
-
         bucket.add_or_update(membership)
         self._views[membership.node_id] = bucket_id
         self._mark_dirty()
@@ -105,7 +103,14 @@ class BucketTable:
         self._dirty_global = False
         return checksums
 
-    async def merge_bucket(self, bucket_id: str, memberships: list[Membership]) -> None:
+    def get_views(self) -> dict[str, str]:
+        return self._views
+
+    async def merge_bucket(
+        self,
+        bucket_id: str,
+        memberships: list[Membership]
+    ) -> MembershipDiff:
         """
         Merge a remote bucket into the local table.
 
@@ -115,31 +120,24 @@ class BucketTable:
         - removed memberships are purged only after TTL expiration
         """
         bucket = self.buckets[bucket_id]
-        changed = False
 
         if memberships:
             await self._sync_incarnation(memberships)
 
-        changed |= await self._upsert_bucket(bucket, memberships)
-        changed |= await self._purge_bucket(bucket, memberships)
+        added, updated = await self._upsert_bucket(bucket, memberships)
+        removed = await self._purge_bucket(bucket, memberships)
+        diff = MembershipDiff(
+            added=added,
+            updated=updated,
+            removed=removed,
+            bucket_id=bucket_id
+        )
 
-        if changed:
+        if diff.changed:
             bucket.dirty = True
             self._mark_dirty()
 
-    def peek_random_member(self) -> Membership | None:
-        """
-        Return a uniformly random membership from the table.
-
-        This uses the global `_views` index to achieve O(1) uniform sampling
-        across all known memberships, independent of bucket distribution.
-        """
-        if not self._views:
-            return None
-
-        node_id = random.choice(list(self._views.keys()))
-        bucket_id = self._views[node_id]
-        return self.buckets[bucket_id].memberships[node_id]
+        return diff
 
     async def remove(self, node_id: str) -> None:
         """
@@ -185,8 +183,9 @@ class BucketTable:
         self,
         bucket: Bucket,
         memberships: list[Membership]
-    ) -> bool:
-        changed = False
+    ) -> tuple[list[Membership], list[MembershipChange]]:
+        added = []
+        updated: list[MembershipChange] = []
 
         for m in memberships:
             if await self._logically_expired(m):
@@ -197,24 +196,24 @@ class BucketTable:
             if local is None:
                 bucket.add_or_update(m)
                 self._views[m.node_id] = bucket.bucket_id
-                changed = True
+                added.append(m)
                 continue
 
             if m.epoch > local.epoch:
                 bucket.add_or_update(m)
                 self._views[m.node_id] = bucket.bucket_id
-                changed = True
+                updated.append(MembershipChange(before=local, after=m))
 
-        return changed
+        return added, updated
 
     async def _purge_bucket(
         self,
         bucket: Bucket,
         memberships: list[Membership]
-    ) -> bool:
+    ) -> list[Membership]:
         remote_ids = {m.node_id for m in memberships}
         local_ids = set(bucket.memberships.keys())
-        changed = False
+        removed = []
 
         for node_id in local_ids - remote_ids:
             local = bucket.memberships[node_id]
@@ -225,6 +224,6 @@ class BucketTable:
             if await self._logically_expired(local):
                 del bucket.memberships[node_id]
                 del self._views[node_id]
-                changed = True
+                removed.append(local)
 
-        return changed
+        return removed
