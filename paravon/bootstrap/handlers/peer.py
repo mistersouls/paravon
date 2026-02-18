@@ -23,6 +23,12 @@ async def remove(data: dict) -> Message:
     return await core.node.remove()
 
 
+@app.request("status/node")
+async def node_status(data: dict) -> Message:
+    core = get_core()
+    return await core.node.node_status()
+
+
 @app.request("gossip/checksums")
 async def gossip_checksums(data: dict) -> Message:
     core = get_core()

@@ -43,6 +43,10 @@ class BucketTable:
 
         self._max_inc = 0
 
+    @property
+    def dirty_global(self):
+        return self._dirty_global
+
     async def add_or_update(self, membership: Membership) -> None:
         """
         Insert or refresh a membership in the table.

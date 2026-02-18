@@ -52,19 +52,18 @@ class NodeService:
                     f"Expected local membership to have tokens "
                     f"when phase={phase}, but empty."
                 )
-            await self._meta_manager.bump_epoch()
             await self._meta_manager.set_tokens(list(tokens))
             self._logger.info(
                 f"Created local Vnodes for node with {membership.size}"
             )
 
         if phase != NodePhase.ready:
-            await self._meta_manager.bump_epoch()
             await self._meta_manager.set_phase(NodePhase.ready)
             self._logger.info(f"Set local membership phase to ready from {phase}.")
         else:
             self._logger.debug("Local membership is ready, skip persisting phase.")
 
+        await self._meta_manager.bump_epoch()
         await self._topology.add_membership(membership)
         self._logger.info(f"Added Local membership {node_id} to the ring.")
 
@@ -75,6 +74,7 @@ class NodeService:
             match membership.phase:
                 case NodePhase.idle:
                     await self._meta_manager.set_phase(NodePhase.joining)
+                    await self._meta_manager.bump_epoch()
                     self._idle_event.clear()
                     self._spawner.spawn(self._complete_join(membership))
                     message = "Received JOIN command."
@@ -101,6 +101,7 @@ class NodeService:
             match membership.phase:
                 case NodePhase.ready:
                     await self._meta_manager.set_phase(NodePhase.draining)
+                    await self._meta_manager.bump_epoch()
                     self._ready_event.clear()
                     self._spawner.spawn(self._complete_drain(membership))
                     message = "Drain scheduled."
@@ -120,6 +121,13 @@ class NodeService:
                         type="ko",
                         data={"message": message}
                     )
+
+    async def node_status(self) -> Message:
+        state = await self._topology.get_state()
+        return Message(
+            type="ok",
+            data=state.to_dict()
+        )
 
     @staticmethod
     async def remove() -> Message:

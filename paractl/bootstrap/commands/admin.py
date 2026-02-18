@@ -22,3 +22,9 @@ def admin_drain(client: ParavonClient, *_) -> Message:
 def admin_remove(client: ParavonClient, *_) -> Message:
     req = Message(type="remove", data={})
     return client.request(req)
+
+
+@cli.command("admin", "node-status")
+def admin_node_status(client: ParavonClient, *_) -> Message:
+    req = Message(type="status/node", data={})
+    return client.request(req)

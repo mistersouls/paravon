@@ -1,5 +1,5 @@
 import bisect
-from typing import Generator
+from typing import Generator, Iterator
 
 from paravon.core.space.vnode import VNode
 
@@ -28,7 +28,7 @@ class Ring:
     """
     def __init__(self, vnodes: list[VNode] = None, *, _sorted: bool = False) -> None:
         vnodes = vnodes or []
-        self._vnodes = vnodes if _sorted else sorted(vnodes)
+        self._vnodes = vnodes if _sorted else sorted(vnodes, key=lambda v: v.token)
 
     def find_successor(self, token: int) -> VNode:
         """
@@ -67,9 +67,9 @@ class Ring:
         if not vnodes:
             return self
 
-        new_vnodes = sorted(vnodes)
+        new_vnodes = sorted(vnodes, key=lambda v: v.token)
         sorted_vnodes = self._merge_sorted(self._vnodes, new_vnodes)
-        return Ring(sorted_vnodes, _sorted=False)
+        return Ring(sorted_vnodes, _sorted=True)
 
     def drop_nodes(self, node_ids: set[str]) -> Ring:
         """
@@ -119,6 +119,9 @@ class Ring:
 
     def __len__(self) -> int:
         return len(self._vnodes)
+
+    def __iter__(self) -> Iterator[VNode]:
+        return iter(self._vnodes)
 
     @staticmethod
     def _merge_sorted(a: list[VNode], b: list[VNode]) -> list[VNode]:

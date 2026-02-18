@@ -2,7 +2,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from paravon.core.helpers.spawn import TaskSpawner
+from paravon.core.gossip.table import BucketTable
+from paravon.core.models.membership import Membership
 from paravon.core.space.ring import Ring
 
 if TYPE_CHECKING:
@@ -35,23 +36,53 @@ class ServerState:
 
 @dataclass
 class PeerState:
-    """
-    Shared state used by the Gossiper to coordinate background tasks and
-    maintain the local view of the cluster ring.
+    membership: Membership
 
-    This object acts as a lightweight container for:
-    - a TaskSpawner used to schedule asynchronous gossip operations
-    - a Ring structure representing the local consistent-hash ring or
-      peer topology (depending on your implementation)
+    table: BucketTable
 
-    PeerState is intentionally minimal: it does not implement any logic
-    itself. It simply groups together the mutable state that multiple
-    components (gossip loop, membership updates, RPC handlers) need to
-    access concurrently.
-    """
-
-    spawner: TaskSpawner
-    """Spawner responsible for launching and supervising background tasks."""
-
-    ring: Ring = field(default_factory=Ring)
+    ring: Ring
     """Local consistent-hash ring or peer topology structure."""
+
+    def to_dict(self) -> dict:
+        local = self.membership
+        data = {
+            "node_id": local.node_id,
+            "incarnation": local.incarnation,
+            "epoch": local.epoch,
+            "phase": local.phase,
+            "peer_listener": local.peer_address,
+            "dirty_global": self.table.dirty_global,
+            "buckets": self._buckets_dict(),
+            "ring": [
+                str(vnode)
+                for vnode in self.ring
+            ]
+        }
+        return data
+
+    def _buckets_dict(self) -> dict:
+        buckets = {}
+        for bucket_id, bucket in self.table.buckets.items():
+            if checksum := bucket.get_checksum():
+                memberships = {
+                    node_id: self._membership_dict(m)
+                    for node_id, m in bucket.memberships.items()
+                }
+                buckets[bucket_id] = {
+                    "dirty": bucket.dirty,
+                    "checksum": checksum,
+                    "memberships": memberships,
+                }
+
+        return buckets
+
+    @staticmethod
+    def _membership_dict(membership: Membership) -> dict:
+        return {
+            "incarnation": membership.incarnation,
+            "epoch": membership.epoch,
+            "phase": membership.phase,
+            "size": membership.size,
+            "tokens": [hex(t) for t in membership.tokens],
+            "peer_listener": membership.peer_address
+        }

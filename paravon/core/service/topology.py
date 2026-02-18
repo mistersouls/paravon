@@ -5,6 +5,7 @@ import random
 from paravon.core.gossip.table import BucketTable
 from paravon.core.helpers.lock import RWLock
 from paravon.core.models.membership import Membership, MembershipDiff
+from paravon.core.models.state import PeerState
 from paravon.core.ports.serializer import Serializer
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.space.ring import Ring
@@ -125,6 +126,24 @@ class TopologyManager:
         """
         async with self._rwlock.read():
             return self._ring
+
+    async def get_state(self) -> PeerState:
+        """
+        Return a consistent snapshot of the local peer state.
+
+        The method acquires a shared read lock to ensure that
+        membership metadata, the partition table, and the ring
+        are observed in a stable state. Once the lock is held,
+        it fetches the current local membership and bundles it
+        with the table and ring into a PeerState object.
+        """
+        async with self._rwlock.read():
+            local = await self._meta_manager.get_membership()
+            return PeerState(
+                membership=local,
+                table=self._table,
+                ring=self._ring
+            )
 
     async def pick_random_membership(self) -> Membership | None:
         """

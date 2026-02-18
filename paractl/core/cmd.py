@@ -135,5 +135,6 @@ class ParaCmd(cmd.Cmd):
         admin_sub.add_parser("join")
         admin_sub.add_parser("drain")
         admin_sub.add_parser("remove")
+        admin_sub.add_parser("node-status")
 
         return global_opts
