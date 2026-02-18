@@ -48,7 +48,7 @@ class SeedBootstrapper:
         self._membership = membership
         self._gossiper = gossiper
 
-        self._quorum = (len(self._peer_config.seeds) // 2) + 1
+        self._quorum = self._quorum_size()
         self._subscription = Subscription(loop)
         self._seed_clients = {}
 
@@ -239,3 +239,7 @@ class SeedBootstrapper:
                 break
 
         return memberships
+
+    def _quorum_size(self) -> int:
+        seeds = self._peer_config.seeds - {self._membership.peer_address}
+        return (len(seeds) // 2) + 1

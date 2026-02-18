@@ -56,12 +56,19 @@ class Gossiper:
 
         for bucket_id, remote_crc in remote_checksums.items():
             local_crc = local.get(bucket_id)
-            if local_crc != remote_crc and remote_crc != 0:
-                self._logger.debug(
-                    f"Checksum for bucket {bucket_id} is different, "
-                    "schedule requesting memberships"
-                )
-                self._spawner.spawn(self.request_bucket(client, bucket_id))
+            if local_crc != remote_crc:
+                if remote_crc == 0:
+                    self._logger.debug(
+                        f"Remote checksum for bucket {bucket_id} "
+                        f"is empty from {peer.node_id}"
+                    )
+                    await self._topology.apply_bucket(bucket_id, [])
+                else:
+                    self._logger.debug(
+                        f"Checksum for bucket {bucket_id} is different "
+                        f"from {peer.node_id}, schedule requesting memberships"
+                    )
+                    self._spawner.spawn(self.request_bucket(client, bucket_id))
 
         return local
 

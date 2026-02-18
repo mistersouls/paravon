@@ -61,22 +61,36 @@ class TopologyManager:
     async def apply_bucket(
         self,
         bucket_id: str,
-        memberships: list[Membership]
+        memberships: list[Membership],
     ) -> None:
         """
         Integrate a remote bucket snapshot into the local topology.
 
-        During gossip exchanges, peers send partial views of their state.
-        This method merges such a snapshot into the local bucket table,
-        producing a diff that captures what changed. If the diff is not
-        empty, the ring is updated accordingly—removing vanished nodes,
-        refreshing updated ones, and adding newcomers. In essence, this
-        method is where remote knowledge reshapes the local topology.
+        This method receives a list of Membership objects coming from a peer
+        during a gossip exchange. Before merging, the caller may specify an
+        `excludes` list to filter out specific node_ids — typically used to
+        prevent reintroducing the local node's own membership during draining
+        or maintenance operations.
+
+        After exclusions are applied, the remaining memberships are merged
+        into the local BucketTable. The merge produces a MembershipDiff that
+        captures additions, updates, and removals. If the diff is non-empty,
+        the consistent-hash ring is updated accordingly: vanished nodes are
+        removed, updated nodes have their tokens refreshed, and newcomers are
+        added. This is the point where remote knowledge reshapes the local
+        topology while respecting explicit exclusions.
         """
+        local = await self._meta_manager.get_membership()
+
         async with self._rwlock.write():
-            diff = await self._table.merge_bucket(bucket_id, memberships)
+            filtered = [m for m in memberships if m.node_id != local.node_id]
+            diff = await self._table.merge_bucket(bucket_id, filtered)
             if diff.changed:
                 await asyncio.to_thread(self._update_ring, diff)
+            else:
+                self._logger.debug(
+                    f"Bucket {bucket_id} is up-to-date, no changes applied"
+                )
 
     async def get_bucket_memberships(self, bucket_id: str) -> dict[str, Membership]:
         """
@@ -129,25 +143,29 @@ class TopologyManager:
             bucket_id = self._table.bucket_for(node_id)
             return self._table.buckets[bucket_id].memberships[node_id]
 
-    async def remove_membership(self, membership: Membership) -> None:
+    async def drain_membership(self, membership: Membership) -> None:
         """
-        Remove a membership from both the bucket table and the ring.
+        Transition a membership into a draining state and remove it from the ring.
 
-        When a node leaves—or is deemed dead—this method ensures that it
-        disappears cleanly from the topology. Its membership is removed
-        from the table, and its virtual nodes are dropped from the ring,
-        freeing its portion of the keyspace for redistribution.
+        This method is used when a node is intentionally leaving the ring—
+        for example during shutdown, maintenance, or a controlled drain.
+        The membership is *not* removed from the bucket table; instead, it is
+        updated there so that its phase, incarnation, and tokens can be
+        propagated through gossip. This ensures that peers converge on the
+        correct state and eventually purge the membership according to the
+        remove-phase and incarnation rules.
+
+        Operationally, the node is removed immediately from the consistent-hash
+        ring so it no longer owns any portion of the keyspace. Keeping the
+        membership in the bucket table allows the cluster to converge cleanly
+        and quickly.
         """
         async with self._rwlock.write():
-            await self._table.remove(membership.node_id)
+            await self._table.add_or_update(membership)
             self._ring = self._ring.drop_nodes({membership.node_id})
+            self._logger.info(f"Membership {membership.node_id} removed from ring.")
 
-    async def restore(
-        self,
-        memberships: list[Membership],
-        *,
-        excludes: list[str] | None = None
-    ) -> None:
+    async def restore(self, memberships: list[Membership]) -> None:
         """
         Rebuild the entire topology from a list of memberships.
 
@@ -157,7 +175,7 @@ class TopologyManager:
         reconstruction is complete, the manager atomically swaps in the
         new structures, effectively resetting the cluster’s topology.
         """
-        excludes = excludes or []
+        local = await self._meta_manager.get_membership()
         table = BucketTable(
             total_buckets=self._TOTAL_BUCKETS,
             serializer=self._serializer,
@@ -167,7 +185,7 @@ class TopologyManager:
         vnodes = []
         async with self._rwlock.write():
             for membership in memberships:
-                if membership.node_id not in excludes:
+                if membership.node_id != local.node_id:
                     self._logger.debug(
                         f"Registering membership {membership.node_id}"
                     )

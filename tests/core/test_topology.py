@@ -54,6 +54,7 @@ async def test_apply_bucket_updates_ring(topology):
     assert ring[0].token == 20
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_get_bucket_memberships(topology):
     m = make_member("node-1")
@@ -66,6 +67,7 @@ async def test_get_bucket_memberships(topology):
     assert isinstance(result["node-1"], Membership)
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_get_checksums(topology):
     m = make_member("node-1")
@@ -77,12 +79,14 @@ async def test_get_checksums(topology):
     assert len(checksums) == topology._TOTAL_BUCKETS
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_get_ring_returns_ring(topology):
     ring = await topology.get_ring()
     assert isinstance(ring, Ring)
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_pick_random_membership(topology):
     m1 = make_member("node-1")
@@ -96,20 +100,22 @@ async def test_pick_random_membership(topology):
     assert picked.node_id in {"node-1", "node-2"}
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_pick_random_membership_empty(topology):
     assert await topology.pick_random_membership() is None
 
 
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_remove_membership(topology, meta_manager):
     m = make_member("node-1", tokens=[10])
     await topology.add_membership(m)
 
-    await topology.remove_membership(m)
+    await topology.drain_membership(m)
 
     bucket_id = topology._table.bucket_for("node-1")
-    assert "node-1" not in topology._table.buckets[bucket_id].memberships
+    assert "node-1" in topology._table.buckets[bucket_id].memberships
 
     ring = await topology.get_ring()
 
@@ -118,7 +124,7 @@ async def test_remove_membership(topology, meta_manager):
     meta_manager.set_incarnation.assert_awaited()
 
 
-
+@pytest.mark.ut
 @pytest.mark.asyncio
 async def test_restore_rebuilds_topology(topology):
     m1 = make_member("node-1", tokens=[10])
@@ -139,17 +145,20 @@ async def test_restore_rebuilds_topology(topology):
     assert ring.find_successor(20).node_id == "node-1"
 
 
-
+@pytest.mark.ut
 @pytest.mark.asyncio
-async def test_restore_excludes_nodes(topology):
-    m1 = make_member("node-1", tokens=[10])
+async def test_restore_skips_local_node(topology, meta_manager):
+    local = await meta_manager.get_membership()
+
+    m1 = make_member(local.node_id, tokens=[10])
     m2 = make_member("node-2", tokens=[20])
 
-    await topology.restore([m1, m2], excludes=["node-2"])
+    await topology.restore([m1, m2])
 
-    assert "node-1" in topology._table._views
-    assert "node-2" not in topology._table._views
+    assert local.node_id not in topology._table._views
+    assert "node-2" in topology._table._views
 
     ring = await topology.get_ring()
-    assert ring.find_successor(10).node_id == "node-1"
-    assert ring.find_successor(20).node_id != "node-2"
+    assert ring.find_successor(20).node_id == "node-2"
+    assert ring.find_successor(10).node_id != local.node_id
+

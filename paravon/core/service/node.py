@@ -162,11 +162,14 @@ class NodeService:
         ...
 
     async def _complete_drain(self, membership: Membership) -> None:
-        await asyncio.sleep(0.1)
         async with self._lock:
             if membership.phase == NodePhase.draining:
+                await self._meta_manager.set_tokens([])
+                await self._meta_manager.bump_epoch()
+                await self._topology.drain_membership(membership)
                 await self._meta_manager.set_phase(NodePhase.idle)
                 self._idle_event.set()
+                self._logger.info("Complete drain.")
 
     async def _complete_join(self, membership: Membership) -> None:
         try:
@@ -178,10 +181,7 @@ class NodeService:
                 gossiper=self._gossiper,
                 loop=self._loop
             ) as memberships:
-                await self._topology.restore(
-                    memberships,
-                    excludes=[membership.node_id]
-                )
+                await self._topology.restore(memberships)
                 # to review: fetch partitions or missing keys
 
         except Exception as ex:

@@ -51,7 +51,7 @@ class BucketTable:
         learns something new about itself or another peer, the table
         absorbs that information, updates the appropriate bucket, and
         ensures that incarnation numbers remain consistent. Any change
-        marks the global state as “dirty”, signaling that checksums
+        marks the global state as "dirty", signaling that checksums
         must be recomputed before the next gossip round.
         """
         self._track_incarnation(membership.incarnation)
@@ -167,10 +167,6 @@ class BucketTable:
             bucket.dirty = True
             self._mark_dirty()
 
-    async def _current_incarnation(self) -> int:
-        membership = await self._meta_manager.get_membership()
-        return membership.incarnation
-
     def _delete_membership(self, bucket: Bucket, node_id: str) -> Membership | None:
         local = bucket.memberships.pop(node_id, None)
         if local is not None:
@@ -178,9 +174,13 @@ class BucketTable:
         return local
 
     async def _ensure_incarnation(self) -> None:
-        local = await self._current_incarnation()
-        target = max(local, self._max_inc) + 1
+        local = await self._meta_manager.get_membership()
+        if local.is_remove_phase():
+            return
+
+        target = max(local.incarnation, self._max_inc) + 1
         await self._meta_manager.set_incarnation(target)
+        await self._refresh_local_membership()
         self._max_inc = target
 
     async def _logically_expired(self, membership: Membership) -> bool:
@@ -190,19 +190,32 @@ class BucketTable:
         A membership is expired if the local incarnation exceeds its
         incarnation by more than the configured delta.
         """
-        local_inc = await self._current_incarnation()
-        return local_inc > membership.incarnation + self._delta
+        local = await self._meta_manager.get_membership()
+        return local.incarnation > membership.incarnation + self._delta
 
     def _mark_dirty(self) -> None:
         self._dirty_global = True
 
+    async def _refresh_local_membership(self):
+        local = await self._meta_manager.get_membership()
+        bucket_id = self.bucket_for(local.node_id)
+        bucket = self.buckets[bucket_id]
+
+        if local.node_id in bucket.memberships:
+            bucket.add_or_update(local)
+            self._views[local.node_id] = bucket_id
+            self._mark_dirty()
+
     async def _sync_incarnation(self, memberships: list[Membership]) -> None:
+        local = await self._meta_manager.get_membership()
+        if local.is_remove_phase():
+            return
+
         max_remote = max(memberships, key=lambda m: m.incarnation).incarnation
         self._track_incarnation(max_remote)
-
-        local = await self._meta_manager.get_membership()
         if max_remote > local.incarnation:
             await self._meta_manager.set_incarnation(max_remote)
+            await self._refresh_local_membership()
 
     def _track_incarnation(self, inc: int) -> None:
         if inc > self._max_inc:
@@ -220,6 +233,8 @@ class BucketTable:
             self._track_incarnation(m.incarnation)
 
             if await self._logically_expired(m):
+                if m.is_remove_phase():
+                    await self.remove(m.node_id)
                 continue
 
             local = bucket.memberships.get(m.node_id)
@@ -230,7 +245,7 @@ class BucketTable:
                 added.append(m)
                 continue
 
-            if m.epoch > local.epoch:
+            if m.is_newer_than(local):
                 bucket.add_or_update(m)
                 self._views[m.node_id] = bucket.bucket_id
                 updated.append(MembershipChange(before=local, after=m))

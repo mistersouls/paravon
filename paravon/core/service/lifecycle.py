@@ -10,7 +10,6 @@ from paravon.core.ports.serializer import Serializer
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.node import NodeService
 from paravon.core.service.topology import TopologyManager
-from paravon.core.space.hashspace import HashSpace
 from paravon.core.throttling.cubic import CubicRateController, CubicRateLimiter
 from paravon.core.transport.server import MessageServer
 
@@ -48,17 +47,6 @@ class LifecycleService:
         self._logger = logging.getLogger("core.service.lifecycle")
 
     async def start(self, stop_event) -> None:
-        membership = await self._meta_manager.get_membership()
-        seeds = self._peer_config.seeds
-        bootstrapped = membership.node_id in seeds or seeds == set()
-
-        if bootstrapped:
-            self._logger.info(f"Starting node {membership.node_id} in bootstrap mode")
-            await self.bootstrap(membership)
-        else:
-            self._logger.info(f"Starting node {membership.node_id} in normal mode")
-            await self.start_normal(stop_event, membership)
-
         await self.start_gossip(stop_event)
         self._logger.info("Started Gossip service")
 
@@ -66,6 +54,17 @@ class LifecycleService:
             self._peer_clients.dispatch_forever(stop_event)
         )
         self._logger.info("Started dispatch loop for incoming peer messages")
+
+        membership = await self._meta_manager.get_membership()
+        seeds = self._peer_config.seeds
+        bootstrapped = membership.peer_address in seeds or seeds == set()
+
+        if bootstrapped:
+            self._logger.info(f"Starting node {membership.node_id} in bootstrap mode")
+            await self.bootstrap(membership)
+        else:
+            self._logger.info(f"Starting node {membership.node_id} in normal mode")
+            await self.start_normal(stop_event, membership)
 
     async def stop(self) -> None:
         if self._api_server.running:

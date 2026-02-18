@@ -108,6 +108,13 @@ class Membership:
 
     peer_address: str
 
+    def is_newer_than(self, other: Membership) -> bool:
+        if self.epoch > other.epoch:
+            return True
+        if self.epoch < other.epoch:
+            return False
+        return self.incarnation > other.incarnation
+
     def is_remove_phase(self) -> bool:
         return self.phase in (NodePhase.idle, NodePhase.draining)
 
