@@ -167,7 +167,32 @@ class NodeService:
         await self._ready_event.wait()
 
     async def recover_ring(self, membership: Membership) -> None:
-        ...
+        match membership.phase:
+            case NodePhase.ready:
+                await self._meta_manager.bump_epoch()
+                await self._discover(membership)
+            case NodePhase.joining:
+                await self._complete_join(membership)
+            case NodePhase.draining:
+                await self._complete_drain(membership)
+            case NodePhase.failed:
+                await self._meta_manager.set_phase(NodePhase.idle)
+                await self._ready_event.wait()
+            case _:
+                raise RuntimeError(f"Cannot recover ring from phase {membership.phase}")
+
+        await self._topology.add_membership(membership)
+
+    async def _discover(self, membership: Membership) -> None:
+        async with SeedBootstrapper(
+            membership=membership,
+            peer_config=self._peer_config,
+            serializer=self._serializer,
+            spawner=self._spawner,
+            gossiper=self._gossiper,
+            loop=self._loop
+        ) as memberships:
+            await self._topology.restore(memberships)
 
     async def _complete_drain(self, membership: Membership) -> None:
         async with self._lock:
@@ -181,17 +206,8 @@ class NodeService:
 
     async def _complete_join(self, membership: Membership) -> None:
         try:
-            async with SeedBootstrapper(
-                membership=membership,
-                peer_config=self._peer_config,
-                serializer=self._serializer,
-                spawner=self._spawner,
-                gossiper=self._gossiper,
-                loop=self._loop
-            ) as memberships:
-                await self._topology.restore(memberships)
-                # to review: fetch partitions or missing keys
-
+            await self._discover(membership)
+            # to review: fetch partitions or missing keys
         except Exception as ex:
             await self._meta_manager.set_phase(NodePhase.failed)
             self._logger.error(f"Error during joining: {ex}")
