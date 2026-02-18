@@ -33,7 +33,7 @@ class VNode(tuple):
     def repr_token(self) -> str:
         int_token = str(self.token)
         if len(int_token) >= 12:
-            int_token = f"{int_token[:6]}…{int_token[-6:]}"
+            int_token = f"{int_token[:6]}...{int_token[-6:]}"
         hex_token = f"{self.token:032x}"[:12]
         return f"Token(hash={int_token}, hex={hex_token})"
 

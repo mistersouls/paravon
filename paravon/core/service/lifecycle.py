@@ -6,10 +6,10 @@ from paravon.core.gossip.gossiper import Gossiper
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.membership import Membership, NodePhase
-from paravon.core.models.state import PeerState
 from paravon.core.ports.serializer import Serializer
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.node import NodeService
+from paravon.core.service.topology import TopologyManager
 from paravon.core.throttling.cubic import CubicRateController, CubicRateLimiter
 from paravon.core.transport.server import MessageServer
 
@@ -21,7 +21,11 @@ class LifecycleService:
         api_server: MessageServer,
         peer_server: MessageServer,
         peer_config: PeerConfig,
+        peer_clients: ClientConnectionPool,
         meta_manager: NodeMetaManager,
+        gossiper: Gossiper,
+        spawner: TaskSpawner,
+        topology_manager: TopologyManager,
         serializer: Serializer,
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
@@ -33,30 +37,16 @@ class LifecycleService:
         self._peer_server = peer_server
         self._peer_config = peer_config
         self._meta_manager = meta_manager
+        self._gossiper = gossiper
+        self._spawner = spawner
+        self._topology = topology_manager
         self._serializer = serializer
+        self._peer_clients = peer_clients
         self._loop = loop
 
-        self._spawner = TaskSpawner(loop=self._loop)
-        self._peer_state = PeerState(spawner=self._spawner)
-        self._peer_clients = ClientConnectionPool(
-            serializer=self._serializer,
-            spawner=self._spawner,
-            ssl_context=self._peer_config.client_ssl_ctx
-        )
         self._logger = logging.getLogger("core.service.lifecycle")
 
     async def start(self, stop_event) -> None:
-        membership = await self._meta_manager.get_membership()
-        seeds = self._peer_config.seeds
-        bootstrapped = membership.node_id in seeds or seeds == set()
-
-        if bootstrapped:
-            self._logger.info(f"Starting node {membership.node_id} in bootstrap mode")
-            await self.bootstrap(membership)
-        else:
-            self._logger.info(f"Starting node {membership.node_id} in normal mode")
-            await self.start_normal(stop_event, membership)
-
         await self.start_gossip(stop_event)
         self._logger.info("Started Gossip service")
 
@@ -64,6 +54,17 @@ class LifecycleService:
             self._peer_clients.dispatch_forever(stop_event)
         )
         self._logger.info("Started dispatch loop for incoming peer messages")
+
+        membership = await self._meta_manager.get_membership()
+        seeds = self._peer_config.seeds
+        bootstrapped = membership.peer_address in seeds or seeds == set()
+
+        if bootstrapped:
+            self._logger.info(f"Starting node {membership.node_id} in bootstrap mode")
+            await self.bootstrap(membership)
+        else:
+            self._logger.info(f"Starting node {membership.node_id} in normal mode")
+            await self.start_normal(stop_event, membership)
 
     async def stop(self) -> None:
         if self._api_server.running:
@@ -88,20 +89,10 @@ class LifecycleService:
     async def bootstrap(self, membership: Membership) -> None:
         await self._peer_server.start()
         self._logger.info("Peer server started at %s:%d", *self._peer_server.listen)
+        await self._node_service.bootstrap_node(membership)
+        self._logger.info("Node initialized in bootstrap mode")
         await self._api_server.start()
         self._logger.info("API server started at %s:%d", *self._api_server.listen)
-
-        phase = membership.phase
-        if phase != NodePhase.ready:
-            await self._meta_manager.set_phase(NodePhase.ready)
-            self._logger.debug(
-                f"Persist membership phase as ready, previous: {phase}"
-            )
-        else:
-            self._logger.debug(
-                "Membership phase is already ready, skip persisting membership phase"
-            )
-
         self._logger.info(
             "Node in standalone mode is now fully operational (PEER + API)."
         )
@@ -114,7 +105,7 @@ class LifecycleService:
         if membership.phase == NodePhase.idle:
             self._logger.info("Waiting for receiving JOIN command.")
             stop_task = asyncio.create_task(stop_event.wait())
-            join_task = asyncio.create_task(self._node_service.wait_join())
+            join_task = asyncio.create_task(self._node_service.wait_for_ready())
             done, pending = await asyncio.wait(
                 [join_task, stop_task],
                 return_when=asyncio.FIRST_COMPLETED
@@ -137,12 +128,6 @@ class LifecycleService:
         )
 
     async def start_gossip(self, stop_event: asyncio.Event) -> None:
-        gossiper = Gossiper(
-            peer_state=self._peer_state,
-            serializer=self._serializer,
-            meta_manager=self._meta_manager,
-            peer_clients=self._peer_clients,
-        )
         cubic_controller = CubicRateController()
         rate_limiter = CubicRateLimiter(controller=cubic_controller)
-        self._spawner.spawn(gossiper.run(stop_event, rate_limiter))
+        self._spawner.spawn(self._gossiper.run(stop_event, rate_limiter))

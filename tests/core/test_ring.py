@@ -142,3 +142,79 @@ def test_merge_sorted_maintains_order():
 
     assert [v.token for v in merged] == [100, 200, 300, 400]
     assert [v.node_id for v in merged] == ["A", "B", "C", "D"]
+
+
+@pytest.mark.ut
+def test_ring_sorts_by_token():
+    vnodes = [
+        VNode(node_id="Z", token=100),
+        VNode(node_id="A", token=300),
+        VNode(node_id="M", token=200),
+    ]
+    ring = Ring(vnodes)
+
+    assert [v.token for v in ring] == [100, 200, 300]
+    assert [v.node_id for v in ring] == ["Z", "M", "A"]
+
+
+@pytest.mark.ut
+def test_add_vnodes_sorts_by_token():
+    base = Ring([
+        VNode("A", 900),
+        VNode("Z", 500),
+    ])
+
+    new = base.add_vnodes([
+        VNode("B", 300),
+        VNode("M", 100),
+    ])
+
+    assert [v.token for v in new] == [100, 300, 500, 900]
+    assert [v.node_id for v in new] == ["M", "B", "Z", "A"]
+
+
+@pytest.mark.ut
+def test_drop_nodes_preserves_token_sort():
+    vnodes = [
+        VNode("Z", 900),
+        VNode("A", 100),
+        VNode("Q", 700),
+        VNode("M", 300),
+        VNode("B", 500),
+        VNode("X", 200),
+        VNode("C", 800),
+        VNode("L", 400),
+        VNode("Y", 600),
+        VNode("D", 1000),
+    ]
+
+    ring = Ring(vnodes)
+
+    expected_before = [
+        ("A", 100),
+        ("X", 200),
+        ("M", 300),
+        ("L", 400),
+        ("B", 500),
+        ("Y", 600),
+        ("Q", 700),
+        ("C", 800),
+        ("Z", 900),
+        ("D", 1000),
+    ]
+
+    assert [(v.node_id, v.token) for v in ring] == expected_before
+
+    removed = {"Z", "M", "Y", "C"}
+    new = ring.drop_nodes(removed)
+
+    expected_after = [
+        ("A", 100),
+        ("X", 200),
+        ("L", 400),
+        ("B", 500),
+        ("Q", 700),
+        ("D", 1000),
+    ]
+
+    assert [(v.node_id, v.token) for v in new] == expected_after

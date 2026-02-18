@@ -1,8 +1,7 @@
 import hashlib
-import random
 
 from paravon.core.gossip.bucket import Bucket
-from paravon.core.models.membership import Membership
+from paravon.core.models.membership import Membership, MembershipChange, MembershipDiff
 from paravon.core.ports.serializer import Serializer
 from paravon.core.service.meta import NodeMetaManager
 
@@ -19,7 +18,6 @@ class BucketTable:
     The table also maintains a lightweight global index mapping
     node_id → bucket_id to support O(1) uniform random sampling of members.
     """
-
     def __init__(
         self,
         total_buckets: int,
@@ -43,55 +41,61 @@ class BucketTable:
         self._checksums_cache: dict[str, int] | None = None
         self._dirty_global: bool = True
 
+        self._max_inc = 0
+
+    @property
+    def dirty_global(self):
+        return self._dirty_global
+
     async def add_or_update(self, membership: Membership) -> None:
         """
-        Insert or update a membership originating from the local node.
+        Insert or refresh a membership in the table.
 
-        This operation bumps the local incarnation to ensure monotonicity,
-        updates the appropriate bucket, and refreshes the global index.
+        This method is the entry point for local updates: when a node
+        learns something new about itself or another peer, the table
+        absorbs that information, updates the appropriate bucket, and
+        ensures that incarnation numbers remain consistent. Any change
+        marks the global state as "dirty", signaling that checksums
+        must be recomputed before the next gossip round.
         """
-        await self._meta_manager.bump_incarnation()
-
+        self._track_incarnation(membership.incarnation)
+        await self._ensure_incarnation()
         bucket_id = self.bucket_for(membership.node_id)
         bucket = self.buckets[bucket_id]
-
         bucket.add_or_update(membership)
         self._views[membership.node_id] = bucket_id
         self._mark_dirty()
 
     def bucket_for(self, peer_id: str) -> str:
         """
-        Compute the bucket identifier for a given peer_id.
+        Determine which bucket a given peer belongs to.
 
-        The mapping is stable and uniform due to MD5 hashing. This ensures
-        even distribution of memberships across buckets.
+        The assignment is fully deterministic: hashing the peer_id
+        produces a stable, uniform distribution across buckets. This
+        ensures that the table remains balanced even as the cluster
+        grows or shrinks.
         """
         h = int(hashlib.md5(peer_id.encode()).hexdigest(), 16)
         return str(h % self._total_buckets)
 
-    def compute_missing_buckets(self, remote_checksums: dict[str, int]) -> list[str]:
-        """
-        Compare local and remote checksums to identify divergent buckets.
-        """
-        local = self.get_checksums()
-        return [
-            bucket_id
-            for bucket_id, remote_crc in remote_checksums.items()
-            if local.get(bucket_id) != remote_crc
-        ]
-
     def get_bucket_memberships(self, bucket_id: str) -> dict[str, dict]:
         """
-        Serialize all memberships stored in a given bucket.
+        Retrieve the serialized view of a bucket’s memberships.
+
+        This is typically used when preparing gossip payloads: the
+        caller receives a compact, serializer-friendly representation
+        of all known members in the specified bucket.
         """
         return self.buckets[bucket_id].serialize_memberships()
 
     def get_checksums(self) -> dict[str, int]:
         """
-        Compute or return cached checksums for all buckets.
+        Return the checksum of each bucket, recomputing them only when needed.
 
-        The checksum vector is used during gossip to detect which buckets
-        differ between peers. Empty buckets produce a stable checksum.
+        The table keeps a cached snapshot of bucket checksums. As long
+        as no bucket has changed, the cached version is reused. When
+        the table is marked dirty, all checksums are recomputed to
+        reflect the latest state before being cached again.
         """
         if not self._dirty_global and self._checksums_cache is not None:
             return self._checksums_cache
@@ -105,68 +109,83 @@ class BucketTable:
         self._dirty_global = False
         return checksums
 
-    async def merge_bucket(self, bucket_id: str, memberships: list[Membership]) -> None:
+    def get_views(self) -> dict[str, str]:
         """
-        Merge a remote bucket into the local table.
+        Expose the global index mapping node_id → bucket_id.
 
-        The merge is monotonic and conflict-free:
-        - newer epochs replace older ones
-        - logically expired memberships are ignored
-        - removed memberships are purged only after TTL expiration
+        This index acts as a fast lookup table that allows the system
+        to quickly locate any membership and to perform uniform random
+        sampling across the entire cluster without scanning all buckets.
+        """
+        return self._views
+
+    async def merge_bucket(
+        self,
+        bucket_id: str,
+        memberships: list[Membership]
+    ) -> MembershipDiff:
+        """
+        Merge a remote bucket into the local one and compute the resulting diff.
+
+        During gossip, peers exchange bucket-level snapshots. This method
+        takes the remote snapshot, aligns incarnation numbers, integrates
+        new or updated memberships, and purges entries that have logically
+        expired. The returned diff captures exactly what changed, allowing
+        higher layers to react or propagate updates efficiently.
         """
         bucket = self.buckets[bucket_id]
-        changed = False
 
         if memberships:
             await self._sync_incarnation(memberships)
 
-        changed |= await self._upsert_bucket(bucket, memberships)
-        changed |= await self._purge_bucket(bucket, memberships)
+        added, updated = await self._upsert_bucket(bucket, memberships)
+        removed = await self._purge_bucket(bucket, memberships)
+        diff = MembershipDiff(
+            added=added,
+            updated=updated,
+            removed=removed,
+            bucket_id=bucket_id
+        )
 
-        if changed:
+        if diff.changed:
             bucket.dirty = True
             self._mark_dirty()
 
-    def peek_random_member(self) -> Membership | None:
-        """
-        Return a uniformly random membership from the table.
-
-        This uses the global `_views` index to achieve O(1) uniform sampling
-        across all known memberships, independent of bucket distribution.
-        """
-        if not self._views:
-            return None
-
-        node_id = random.choice(list(self._views.keys()))
-        bucket_id = self._views[node_id]
-        return self.buckets[bucket_id].memberships[node_id]
+        return diff
 
     async def remove(self, node_id: str) -> None:
         """
-        Remove a membership originating from the local node.
+        Remove a membership from the table, if it exists.
 
-        This marks the membership as deleted, bumps the local incarnation,
-        and removes it from both the bucket and the global index.
+        This method is used when a node transitions into a removal phase
+        or when the system decides that a membership should no longer be
+        tracked. The removal is applied to the appropriate bucket and the
+        global index is updated accordingly.
         """
         bucket_id = self.bucket_for(node_id)
         bucket = self.buckets[bucket_id]
 
         if node_id in bucket.memberships:
-            await self._meta_manager.bump_incarnation()
-            del bucket.memberships[node_id]
-            del self._views[node_id]
+            await self._ensure_incarnation()
+            self._delete_membership(bucket, node_id)
             bucket.dirty = True
             self._mark_dirty()
 
-    async def _sync_incarnation(self, memberships: list[Membership]) -> None:
-        greater_membership = max(memberships, key=lambda m: m.incarnation)
-        local = await self._meta_manager.get_membership()
-        if greater_membership.incarnation > local.incarnation:
-            await self._meta_manager.set_incarnation(greater_membership.incarnation)
+    def _delete_membership(self, bucket: Bucket, node_id: str) -> Membership | None:
+        local = bucket.memberships.pop(node_id, None)
+        if local is not None:
+            self._views.pop(node_id, None)
+        return local
 
-    async def _current_incarnation(self) -> int:
-        membership = await self._meta_manager.get_membership()
-        return membership.incarnation
+    async def _ensure_incarnation(self) -> None:
+        local = await self._meta_manager.get_membership()
+        if local.is_remove_phase():
+            return
+
+        target = max(local.incarnation, self._max_inc) + 1
+        await self._meta_manager.set_incarnation(target)
+        await self._refresh_local_membership()
+        self._max_inc = target
 
     async def _logically_expired(self, membership: Membership) -> bool:
         """
@@ -175,21 +194,51 @@ class BucketTable:
         A membership is expired if the local incarnation exceeds its
         incarnation by more than the configured delta.
         """
-        local_inc = await self._current_incarnation()
-        return local_inc > membership.incarnation + self._delta
+        local = await self._meta_manager.get_membership()
+        return local.incarnation > membership.incarnation + self._delta
 
     def _mark_dirty(self) -> None:
         self._dirty_global = True
+
+    async def _refresh_local_membership(self):
+        local = await self._meta_manager.get_membership()
+        bucket_id = self.bucket_for(local.node_id)
+        bucket = self.buckets[bucket_id]
+
+        if local.node_id in bucket.memberships:
+            bucket.add_or_update(local)
+            self._views[local.node_id] = bucket_id
+            self._mark_dirty()
+
+    async def _sync_incarnation(self, memberships: list[Membership]) -> None:
+        local = await self._meta_manager.get_membership()
+        if local.is_remove_phase():
+            return
+
+        max_remote = max(memberships, key=lambda m: m.incarnation).incarnation
+        self._track_incarnation(max_remote)
+        if max_remote > local.incarnation:
+            await self._meta_manager.set_incarnation(max_remote)
+            await self._refresh_local_membership()
+
+    def _track_incarnation(self, inc: int) -> None:
+        if inc > self._max_inc:
+            self._max_inc = inc
 
     async def _upsert_bucket(
         self,
         bucket: Bucket,
         memberships: list[Membership]
-    ) -> bool:
-        changed = False
+    ) -> tuple[list[Membership], list[MembershipChange]]:
+        added = []
+        updated: list[MembershipChange] = []
 
         for m in memberships:
+            self._track_incarnation(m.incarnation)
+
             if await self._logically_expired(m):
+                if m.is_remove_phase():
+                    await self.remove(m.node_id)
                 continue
 
             local = bucket.memberships.get(m.node_id)
@@ -197,24 +246,24 @@ class BucketTable:
             if local is None:
                 bucket.add_or_update(m)
                 self._views[m.node_id] = bucket.bucket_id
-                changed = True
+                added.append(m)
                 continue
 
-            if m.epoch > local.epoch:
+            if m.is_newer_than(local):
                 bucket.add_or_update(m)
                 self._views[m.node_id] = bucket.bucket_id
-                changed = True
+                updated.append(MembershipChange(before=local, after=m))
 
-        return changed
+        return added, updated
 
     async def _purge_bucket(
         self,
         bucket: Bucket,
         memberships: list[Membership]
-    ) -> bool:
+    ) -> list[Membership]:
         remote_ids = {m.node_id for m in memberships}
         local_ids = set(bucket.memberships.keys())
-        changed = False
+        removed = []
 
         for node_id in local_ids - remote_ids:
             local = bucket.memberships[node_id]
@@ -223,8 +272,8 @@ class BucketTable:
                 continue
 
             if await self._logically_expired(local):
-                del bucket.memberships[node_id]
-                del self._views[node_id]
-                changed = True
+                deleted = self._delete_membership(bucket, node_id)
+                if deleted is not None:
+                    removed.append(deleted)
 
-        return changed
+        return removed

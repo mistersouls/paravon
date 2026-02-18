@@ -59,6 +59,10 @@ class ClientConnection:
 
         self._logger = logging.getLogger("core.connections.client")
 
+    @property
+    def address(self) -> str:
+        return self._address
+
     async def close(self) -> None:
         """
         Permanently shut down the connection.

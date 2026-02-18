@@ -27,6 +27,7 @@ class NodePhase(StrEnum):
     joining = "joining"
     draining = "draining"
     ready = "ready"
+    failed = "failed"
 
 
 @dataclass
@@ -107,6 +108,13 @@ class Membership:
 
     peer_address: str
 
+    def is_newer_than(self, other: Membership) -> bool:
+        if self.epoch > other.epoch:
+            return True
+        if self.epoch < other.epoch:
+            return False
+        return self.incarnation > other.incarnation
+
     def is_remove_phase(self) -> bool:
         return self.phase in (NodePhase.idle, NodePhase.draining)
 
@@ -116,17 +124,14 @@ class Membership:
         Tokens are stored as fixed‑width 16‑byte values to minimize overhead and
         ensure deterministic encoding across nodes.
         """
-        # tokens are 128‑bit values; we convert them to bytes
-        # to make them more compact for gossip
-        tokens = [t.to_bytes(16, "big") for t in self.tokens]
-
         return {
             "incarnation": self.incarnation,
             "epoch": self.epoch,
             "node_id": self.node_id,
             "size": self.size.name,
             "phase": self.phase.name,
-            "tokens": self.tokens_bytes(self.tokens)
+            "tokens": self.tokens_bytes(self.tokens),
+            "peer_address": self.peer_address
         }
 
     @classmethod
@@ -150,7 +155,8 @@ class Membership:
             node_id=data["node_id"],
             size=size,
             phase=phase,
-            tokens=cls.tokens_from(data["tokens"])
+            tokens=cls.tokens_from(data["tokens"]),
+            peer_address=data["peer_address"]
         )
 
     @staticmethod
@@ -160,3 +166,33 @@ class Membership:
     @staticmethod
     def tokens_from(tokens: list[bytes]) -> list[int]:
         return [int.from_bytes(token, "big") for token in tokens]
+
+
+@dataclass
+class View:
+    incarnation: int
+    checksums: dict[str, int]
+    address: str
+    peer: str
+
+
+@dataclass
+class MembershipChange:
+    before: Membership
+    after: Membership
+
+
+@dataclass(frozen=True)
+class MembershipDiff:
+    added: list[Membership]
+    removed: list[Membership]
+    updated: list[MembershipChange]
+    bucket_id: str
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.added or self.removed or self.updated)
+
+    @classmethod
+    def from_empty(cls, bucket_id: str) -> MembershipDiff:
+        return MembershipDiff(added=[], removed= [], updated=[], bucket_id=bucket_id)

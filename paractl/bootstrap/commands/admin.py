@@ -14,11 +14,17 @@ def admin_join(client: ParavonClient, *_) -> Message:
 
 @cli.command("admin", "drain")
 def admin_drain(client: ParavonClient, *_) -> Message:
-    req = Message(type="join", data={})
+    req = Message(type="drain", data={})
     return client.request(req)
 
 
 @cli.command("admin", "remove")
 def admin_remove(client: ParavonClient, *_) -> Message:
     req = Message(type="remove", data={})
+    return client.request(req)
+
+
+@cli.command("admin", "node-status")
+def admin_node_status(client: ParavonClient, *_) -> Message:
+    req = Message(type="status/node", data={})
     return client.request(req)
