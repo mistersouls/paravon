@@ -7,7 +7,7 @@ from paravon.bootstrap.config.settings import ParavonConfig
 from paravon.core.controlplane import ControlPlane
 from paravon.core.facade import ParaCore
 from paravon.core.routing.app import RoutedApplication
-from paravon.infra.lmdb_storage import LMDBStorageFactory
+from paravon.infra.lmdb_storage.aiobackend import LMDBStorageFactory
 from paravon.infra.msgpack_serializer import MsgPackSerializer
 
 

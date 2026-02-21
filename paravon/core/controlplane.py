@@ -46,7 +46,7 @@ class ControlPlane:
 
         self._meta_manager = NodeMetaManager(
             peer_config=self._peer_config,
-            system_storage=self._storage_factory.create("system"),
+            storage_factory=self._storage_factory,
             serializer=self._serializer
         )
         self._api_server = MessageServer(
