@@ -257,6 +257,7 @@ class PlacementSettings(BaseModel):
         )
     ]
 
+
 class ParavonConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PARAVON_",

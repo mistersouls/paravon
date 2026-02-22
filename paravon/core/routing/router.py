@@ -34,7 +34,7 @@ class Router:
                 raise RuntimeError(f"Handler already registered for '{method}'")
 
             @functools.wraps(func)
-            async def wrapper(*args, **kwargs): # keep it for later
+            async def wrapper(*args, **kwargs):  # keep it for later
                 return await func(*args, **kwargs)
 
             self._routes[method] = wrapper

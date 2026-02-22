@@ -23,7 +23,7 @@ from paravon.core.transport.server import MessageServer
 class ControlPlane:
     def __init__(
         self,
-        config: ParavonConfig, # todo(souls): break hexagonal design
+        config: ParavonConfig,  # todo(souls): break hexagonal design
         api_app: Application,
         peer_app: Application,
         serializer: Serializer,

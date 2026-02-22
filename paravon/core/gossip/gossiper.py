@@ -99,7 +99,7 @@ class Gossiper:
             if self._inflight.locked():
                 rate_limiter.on_error()
             else:
-               self._spawner.spawn(self._attempt_gossip(peer, rate_limiter))
+                self._spawner.spawn(self._attempt_gossip(peer, rate_limiter))
 
     async def pick_random_peer(self) -> Membership | None:
         peer = await self._topology.pick_random_membership()

@@ -81,7 +81,6 @@ class MessageServer:
             backlog=config.backlog,
             ssl=config.ssl_ctx
         )
-        sock = self._server.sockets[0].getsockname()
 
     async def shutdown(self) -> None:
         if self._server:
