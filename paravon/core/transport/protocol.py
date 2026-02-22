@@ -76,7 +76,7 @@ class Protocol(asyncio.Protocol):
         self._tasks.add(task)
 
         self._client = get_remote_addr(transport)
-        who = f"%s:%d" % self._client if self._client else ""
+        who = "%s:%d" % self._client if self._client else ""
         self._logger.debug(f"{who} - Connection made")
 
     def connection_lost(self, exc: Exception | None) -> None:

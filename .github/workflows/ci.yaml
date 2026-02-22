@@ -1,0 +1,36 @@
+# This workflow installs Python dependencies, runs tests and linting using uv
+
+name: Paravon CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install uv and set the Python version
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version-file: "pyproject.toml"
+
+    - name: Install the project
+      run: uv sync --locked --all-extras --dev
+
+    - name: Lint with flake8
+      run: |
+        uv run flake8 ./paravon --count --select=E9,F63,F7,F82 --show-source --statistics
+        uv run flake8 ./paravon --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Test with pytest
+      run: uv run pytest

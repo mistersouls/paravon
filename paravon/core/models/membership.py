@@ -9,12 +9,12 @@ class NodeSize(IntEnum):
     Each size corresponds to a power‑of‑two number of virtual nodes,
     allowing the ring to scale smoothly as nodes join or leave.
     """
-    XS      = 1 << 0    # 1 vnode
-    S       = 1 << 1
-    M       = 1 << 2
-    L       = 1 << 3
-    XL      = 1 << 4
-    XXL     = 1 << 5
+    XS = 1 << 0    # 1 vnode
+    S = 1 << 1
+    M = 1 << 2
+    L = 1 << 3
+    XL = 1 << 4
+    XXL = 1 << 5
 
 
 class NodePhase(StrEnum):
@@ -195,4 +195,4 @@ class MembershipDiff:
 
     @classmethod
     def from_empty(cls, bucket_id: str) -> MembershipDiff:
-        return MembershipDiff(added=[], removed= [], updated=[], bucket_id=bucket_id)
+        return MembershipDiff(added=[], removed=[], updated=[], bucket_id=bucket_id)
