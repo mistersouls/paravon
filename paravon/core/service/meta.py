@@ -3,7 +3,7 @@ from typing import Any
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.membership import NodePhase, Membership, NodeSize
 from paravon.core.ports.serializer import Serializer
-from paravon.core.ports.storage import Storage
+from paravon.core.ports.storage import Storage, StorageFactory
 
 
 class NodeMetaManager:
@@ -19,11 +19,17 @@ class NodeMetaManager:
     once initialized, this situation is treated as a fatal error and the
     manager raises a RuntimeError.
     """
-    _SYS_NAMESPACE = b"system"
+    SYS_KEYSPACE = b"system"
+    SYS_SID = "system"
 
-    def __init__(self, peer_config: PeerConfig, system_storage: Storage, serializer: Serializer) -> None:
+    def __init__(
+        self,
+        peer_config: PeerConfig,
+        storage_factory: StorageFactory,
+        serializer: Serializer
+    ) -> None:
         self._peer_config = peer_config
-        self._system_storage = system_storage
+        self._storage_factory = storage_factory
         self._serializer = serializer
         self._membership: Membership | None = None
 
@@ -147,15 +153,20 @@ class NodeMetaManager:
             peer_address=peer_address
         )
 
+    async def _get_backend(self) -> Storage:
+        return await self._storage_factory.get(self.SYS_SID)
+
     async def _get(self, key: str, default: Any = None) -> Any:
-        value = await self._system_storage.get(self._SYS_NAMESPACE, key.encode())
+        backend = await self._storage_factory.get(self.SYS_SID)
+        value = await backend.get(self.SYS_KEYSPACE, key.encode())
         if value is not None:
             return self._serializer.deserialize(value)
         return default
 
     async def _put(self, key: str, value: Any) -> None:
-        await self._system_storage.put(
-            self._SYS_NAMESPACE,
+        backend = await self._storage_factory.get(self.SYS_SID)
+        await backend.put(
+            self.SYS_KEYSPACE,
             key.encode(),
             self._serializer.serialize(value)
         )

@@ -119,3 +119,20 @@ storage:
   # are written before being atomically swapped into place.
   # If omitted, defaults to "<storage.data_dir>".
   replication_dir: ""
+
+
+# =====================================================================
+# Placement / Ring configuration
+# =====================================================================
+placement:
+  # [Default: 16]
+  # Shift factor used to compute the total number of logical partitions (Q).
+  # Q = 1 << shift
+  #
+  # This value MUST remain stable for the lifetime of the cluster.
+  shift: 16
+
+  # [Default: 3]
+  # Number of distinct nodes that must store each partition.
+  # A replication_factor of N means each key is stored on N different nodes.
+  replication_factor: 3

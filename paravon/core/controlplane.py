@@ -6,6 +6,7 @@ from paravon.bootstrap.config.settings import ParavonConfig
 from paravon.core.connections.pool import ClientConnectionPool
 from paravon.core.facade import ParaCore
 from paravon.core.gossip.gossiper import Gossiper
+from paravon.core.helpers.hlc import LWWConflictResolver
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import ServerConfig, PeerConfig
 from paravon.core.ports.serializer import Serializer
@@ -46,7 +47,7 @@ class ControlPlane:
 
         self._meta_manager = NodeMetaManager(
             peer_config=self._peer_config,
-            system_storage=self._storage_factory.create("system"),
+            storage_factory=self._storage_factory,
             serializer=self._serializer
         )
         self._api_server = MessageServer(
@@ -86,7 +87,13 @@ class ControlPlane:
             spawner=self._spawner,
             loop=self._loop,
         )
-        self._storage_service = StorageService()
+        self._storage_service = StorageService(
+            peer_config=self._peer_config,
+            backend_factory=self._storage_factory,
+            serializer=self._serializer,
+            conflict_resolver=LWWConflictResolver(),
+            topology=self._topology_manager
+        )
         self._lifecycle_service = LifecycleService(
             node_service=self._node_service,
             api_server=self._api_server,
@@ -141,6 +148,7 @@ class ControlPlane:
         server_config = self._config.server
         peer_config = server_config.peer
         node_config = self._config.node
+        placement_config = self._config.placement
 
         config = PeerConfig(
             node_id=node_config.id,
@@ -156,7 +164,9 @@ class ControlPlane:
             timeout_graceful_shutdown=server_config.timeout_graceful_shutdown,
             seeds=set(peer_config.seeds),
             peer_listener=peer_config.listener,
-            client_ssl_ctx=client_ctx
+            client_ssl_ctx=client_ctx,
+            partition_shift=placement_config.shift,
+            replication_factor=placement_config.replication_factor
         )
 
         return config

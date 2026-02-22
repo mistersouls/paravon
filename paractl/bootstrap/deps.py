@@ -8,6 +8,6 @@ from paravon.infra.msgpack_serializer import MsgPackSerializer
 @lru_cache
 def get_cli():
     serializer = MsgPackSerializer()
-    renderer = YamlRenderer()
+    renderer = YamlRenderer(serializer)
     cli = ParaCmd(serializer, renderer)
     return cli
