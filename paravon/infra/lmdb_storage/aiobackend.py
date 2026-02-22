@@ -3,8 +3,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import AsyncIterator
 
-from paravon.core.helpers.utils import decrement_key, increment_key
 from paravon.core.ports.storage import Storage
+from paravon.core.storage.codec import KeyCodec
 from paravon.infra.lmdb_storage.backend import LMDBBackend
 
 
@@ -102,9 +102,9 @@ class LMDBStorage:
 
             # pagination strict
             if reverse:
-                next_key = decrement_key(batch[-1][0])
+                next_key = KeyCodec.decrement_key(batch[-1][0])
             else:
-                next_key = increment_key(batch[-1][0])
+                next_key = KeyCodec.increment_key(batch[-1][0])
 
     async def close(self) -> None:
         def shutdown() -> None:

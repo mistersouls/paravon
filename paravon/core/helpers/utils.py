@@ -82,17 +82,3 @@ def scan(package: str):
         return wrapper
 
     return decorator
-
-
-def decrement_key(key: bytes) -> bytes:
-    for i in range(len(key) - 1, -1, -1):
-        if key[i] != 0x00:
-            return key[:i] + bytes([key[i] - 1]) + b"\xFF" * (len(key) - i - 1)
-    return b""
-
-
-def increment_key(key: bytes) -> bytes:
-    for i in range(len(key) - 1, -1, -1):
-        if key[i] != 0xFF:
-            return key[:i] + bytes([key[i] + 1])
-    return key + b"\x00"

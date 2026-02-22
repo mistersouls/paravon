@@ -1,6 +1,6 @@
 import pytest
 
-from paravon.core.helpers.utils import increment_key, decrement_key
+from paravon.core.storage.codec import KeyCodec
 from paravon.infra.lmdb_storage.backend import LMDBBackend
 
 
@@ -206,13 +206,13 @@ def test_pagination_forward(tmp_path):
 
     # Page 2
     last_key_p1 = p1[-1][0]
-    start_p1 = increment_key(last_key_p1)
+    start_p1 = KeyCodec.increment_key(last_key_p1)
     p2 = backend.scan(ks, start=start_p1, limit=page_size)
     assert p2 == items[2:4]
 
     # Page 3
     last_key_p2 = p2[-1][0]
-    start_p2 = increment_key(last_key_p2)
+    start_p2 = KeyCodec.increment_key(last_key_p2)
     p3 = backend.scan(ks, start=start_p2, limit=page_size)
     assert p3 == items[4:]
 
@@ -238,13 +238,13 @@ def test_pagination_reverse(tmp_path):
 
     # Page 2
     last_key_p1 = p1[-1][0]      # d
-    start_p1 = decrement_key(last_key_p1)
+    start_p1 = KeyCodec.decrement_key(last_key_p1)
     p2 = backend.scan(ks, start=start_p1, limit=page_size, reverse=True)
     assert p2 == rev_items[2:4]  # [c, b]
 
     # Page 3
     last_key_p2 = p2[-1][0]      # b
-    start_p2 = decrement_key(last_key_p2)
+    start_p2 = KeyCodec.decrement_key(last_key_p2)
     p3 = backend.scan(ks, start=start_p2, limit=page_size, reverse=True)
     assert p3 == rev_items[4:]   # [a]
 
@@ -357,7 +357,7 @@ def test_scan_prefix_pagination_forward(tmp_path):
     assert p1 == items[:2]
 
     # Page 2
-    start2 = increment_key(p1[-1][0])
+    start2 = KeyCodec.increment_key(p1[-1][0])
     p2 = backend.scan(ks, prefix=b"user:", start=start2, limit=2)
     assert p2 == items[2:]
 
@@ -380,7 +380,7 @@ def test_scan_prefix_pagination_reverse(tmp_path):
     assert p1 == rev[:2]
 
     # Page 2
-    start2 = decrement_key(p1[-1][0])
+    start2 = KeyCodec.decrement_key(p1[-1][0])
     p2 = backend.scan(ks, prefix=b"user:", start=start2, limit=2, reverse=True)
     assert p2 == rev[2:]
 
