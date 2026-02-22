@@ -17,11 +17,11 @@ class PartitionedStorage(Storage):
         self._lock = asyncio.Lock()
 
     async def get(self, keyspace: bytes, key: bytes) -> bytes | None:
-        backend = await self._select_backend(keyspace)
+        backend = await self.select_backend(keyspace)
         return await backend.get(keyspace, key)
 
     async def put(self, keyspace: bytes, key: bytes, value: bytes) -> None:
-        backend = await self._select_backend(keyspace)
+        backend = await self.select_backend(keyspace)
         return await backend.put(keyspace, key, value)
 
     async def put_many(self, items: list[tuple[bytes, bytes, bytes]]) -> None:
@@ -33,12 +33,12 @@ class PartitionedStorage(Storage):
             raise ValueError("put_many requires all items to share the same keyspace")
 
         keyspace = next(iter(keyspaces))
-        backend = await self._select_backend(keyspace)
+        backend = await self.select_backend(keyspace)
 
         await backend.put_many(items)
 
     async def delete(self, keyspace: bytes, key: bytes) -> None:
-        backend = await self._select_backend(keyspace)
+        backend = await self.select_backend(keyspace)
         return await backend.delete(keyspace, key)
 
     async def close(self) -> None:
@@ -53,7 +53,7 @@ class PartitionedStorage(Storage):
         reverse: bool = False,
         batch_size: int = 1024,
     ) -> AsyncIterator[tuple[bytes, bytes]]:
-        backend = await self._select_backend(keyspace)
+        backend = await self.select_backend(keyspace)
         async for key, value in backend.iter(
             keyspace=keyspace,
             prefix=prefix,
@@ -64,7 +64,7 @@ class PartitionedStorage(Storage):
         ):
             yield key, value
 
-    async def _select_backend(self, keyspace: bytes) -> Storage:
+    async def select_backend(self, keyspace: bytes) -> Storage:
         pid = int(keyspace.decode("ascii"), 16)
         env_index = pid // self._storage_factory.max_keyspaces
         return await self._storage_factory.get(str(env_index))

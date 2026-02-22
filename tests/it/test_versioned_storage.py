@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from paravon.core.helpers.hlc import HLC
+from paravon.core.helpers.hlc import HLC, LWWConflictResolver
 from paravon.core.storage.codec import KeyCodec
 from paravon.core.storage.versioned import VersionedStorage
 from paravon.infra.lmdb_storage.aiobackend import LMDBStorage
@@ -14,7 +14,8 @@ def vs(tmp_path) -> VersionedStorage:
     backend = LMDBStorage(str(tmp_path), map_size=1 << 20)
     serializer = MsgPackSerializer()
     hlc = HLC.initial(node_id="node-1")
-    return VersionedStorage(backend, hlc, serializer)
+    resolver = LWWConflictResolver()
+    return VersionedStorage(backend, hlc, serializer, resolver)
 
 
 @pytest.mark.it
@@ -129,14 +130,19 @@ async def test_vs_multi_keyspace_isolation(vs):
 async def test_vs_hlc_persistence(tmp_path):
     backend = LMDBStorage(str(tmp_path), map_size=1 << 16)
     serializer = MsgPackSerializer()
+    resolver = LWWConflictResolver()
 
-    vs1 = VersionedStorage(backend, HLC.initial("node-1"), serializer)
+    vs1 = VersionedStorage(
+        backend, HLC.initial("node-1"), serializer, resolver
+    )
     await vs1.put(b"ks", b"a", b"1")
     await vs1.close()
 
     # reopen
     backend2 = LMDBStorage(str(tmp_path), map_size=1 << 16)
-    vs2 = VersionedStorage(backend2, HLC.initial("node-1"), serializer)
+    vs2 = VersionedStorage(
+        backend2, HLC.initial("node-1"), serializer, resolver
+    )
 
     await vs2.put(b"ks", b"a", b"2")
     val = await vs2.get(b"ks", b"a")

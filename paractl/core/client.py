@@ -1,6 +1,7 @@
 import socket
 import ssl
 import struct
+from typing import Any
 
 from paravon.core.models.message import Message
 from paravon.core.ports.serializer import Serializer

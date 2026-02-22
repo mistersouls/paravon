@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, Iterable
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -129,3 +129,47 @@ class HLC:
             logical=int(data["logical"]),
             node_id=str(data["node_id"]),
         )
+
+
+class ConflictResolver(Protocol):
+    def resolve(self, versions: Iterable[HLC]) -> HLC | None:
+        ...
+
+
+class LWWConflictResolver:
+    """
+    Last‑Writer‑Wins (LWW) conflict resolver based on HLC.
+
+    Invariant:
+        Given a set of concurrent versions, all nodes must deterministically
+        choose the same "winning" version.
+
+    Rule:
+        - The version with the largest HLC wins.
+        - HLC provides a total order, so ties are impossible unless the
+          timestamps are identical down to node_id (extremely rare).
+    """
+
+    @staticmethod
+    def resolve(versions: Iterable[HLC]) -> HLC | None:
+        """
+        Resolve a set of concurrent versions into a single version.
+
+        Parameters:
+            versions: iterable of ValueVersion objects (from quorum reads,
+                      anti‑entropy sync, or gossip repair)
+
+        Returns:
+            The LWW winner, or None if the set is empty.
+        """
+        iterator = iter(versions)
+        try:
+            best = next(iterator)
+        except StopIteration:
+            return None
+
+        for candidate in iterator:
+            if candidate > best:
+                best = candidate
+
+        return best

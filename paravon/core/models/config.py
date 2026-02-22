@@ -73,4 +73,5 @@ class PeerConfig(ServerConfig):
     seeds: set[str]
     peer_listener: str
     client_ssl_ctx: ssl.SSLContext
-
+    partition_shift: int
+    replication_factor: int

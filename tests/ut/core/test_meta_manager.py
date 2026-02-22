@@ -27,6 +27,8 @@ def peer_config():
         backlog=120,
         seeds=set(),
         peer_listener="127.0.0.1:0",
+        partition_shift=16,
+        replication_factor=3
     )
 
 

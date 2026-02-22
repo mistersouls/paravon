@@ -224,6 +224,39 @@ class StorageSettings(BaseModel):
     ]
 
 
+class PlacementSettings(BaseModel):
+    shift: Annotated[
+        int,
+        Field(
+            description=(
+                "Shift factor used to compute the total number of logical partitions (Q).\n"
+                "Q = 1 << shift\n\n"
+                "This defines the granularity of the ring. A larger shift increases the\n"
+                "number of partitions, improving distribution fairness but also increasing\n"
+                "the number of storage directories and the cost of rebalancing.\n\n"
+                "This value MUST remain stable for the lifetime of the cluster. Changing it\n"
+                "alters every partition boundary and requires a full migration of all data."
+            ),
+            default=16
+        )
+    ]
+
+    replication_factor: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of distinct nodes that must store each partition.\n"
+                "A replication_factor of N means each key is stored on N different nodes,\n"
+                "following the ring's successor ordering.\n\n"
+                "This value must be <= the number of nodes in the cluster. Increasing it\n"
+                "adds replicas and triggers a controlled rebalance; decreasing it removes\n"
+                "replicas and requires coordinated cleanup.\n\n"
+                "This setting affects durability, availability, and read/write quorum rules."
+            ),
+            default=3
+        )
+    ]
+
 class ParavonConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PARAVON_",
@@ -263,6 +296,20 @@ class ParavonConfig(BaseSettings):
                 "partitions, metadata, and vnode assignments. This directory must be\n"
                 "stable and writable across restarts."
             )
+        )
+    ]
+
+    placement: Annotated[
+        PlacementSettings,
+        Field(
+            description=(
+                "Ring and placement configuration.\n"
+                "Defines the number of partitions (via shift), the replication factor,\n"
+                "and the rules governing how data is distributed across the cluster.\n"
+                "This section determines how keys map to partitions and how replicas\n"
+                "are assigned to nodes."
+            ),
+            default_factory=PlacementSettings
         )
     ]
 

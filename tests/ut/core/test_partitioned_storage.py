@@ -58,10 +58,10 @@ def storage(serializer):
 @pytest.mark.asyncio
 async def test_partition_routing(storage):
     # keyspace "0001" → pid = 1 → env_index = 1 // 4 = 0
-    backend1 = await storage._select_backend(b"0001")
+    backend1 = await storage.select_backend(b"0001")
 
     # keyspace "0008" → pid = 8 → env_index = 8 // 4 = 2
-    backend2 = await storage._select_backend(b"0008")
+    backend2 = await storage.select_backend(b"0008")
 
     assert backend1 is not backend2
 
@@ -146,8 +146,8 @@ async def test_two_keyspaces_two_envs(storage):
     await storage.put(b"0001", b"a", b"1")
     await storage.put(b"0008", b"a", b"2")
 
-    backend1 = await storage._select_backend(b"0001")
-    backend2 = await storage._select_backend(b"0008")
+    backend1 = await storage.select_backend(b"0001")
+    backend2 = await storage.select_backend(b"0008")
 
     assert backend1 is not backend2
     assert backend1.data[(b"0001", b"a")] == b"1"
