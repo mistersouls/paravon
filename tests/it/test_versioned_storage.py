@@ -61,6 +61,7 @@ async def test_vs_put_many(vs):
     assert await vs.get(b"ks", b"c") == b"3"
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_vs_iter_temporal_order(vs):
     await vs.put(b"ks", b"a", b"1")
@@ -80,6 +81,7 @@ async def test_vs_iter_temporal_order(vs):
     ]
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_vs_iter_reverse(vs):
     await vs.put(b"ks", b"a", b"1")
@@ -97,6 +99,7 @@ async def test_vs_iter_reverse(vs):
     ]
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_vs_iter_prefix(vs):
     await vs.put(b"ks", b"user:1", b"1")
@@ -111,6 +114,7 @@ async def test_vs_iter_prefix(vs):
     assert out == []
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_vs_multi_keyspace_isolation(vs):
     await vs.put(b"ks1", b"a", b"1")
@@ -120,6 +124,7 @@ async def test_vs_multi_keyspace_isolation(vs):
     assert await vs.get(b"ks2", b"a") == b"2"
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_vs_hlc_persistence(tmp_path):
     backend = LMDBStorage(str(tmp_path), map_size=1 << 16)
@@ -141,6 +146,7 @@ async def test_vs_hlc_persistence(tmp_path):
     await vs2.close()
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_vs_iter_ignores_corrupted_index(vs):
     # normal entries
@@ -157,6 +163,7 @@ async def test_vs_iter_ignores_corrupted_index(vs):
     assert out == [(b"a", b"1"), (b"b", b"2")]
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_vs_iter_since_hlc(vs):
     await vs.put(b"ks", b"a", b"v1")
