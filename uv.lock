@@ -238,7 +238,7 @@ wheels = [
 
 [[package]]
 name = "paravon"
-version = "0.0.1"
+version = "0.0.1.dev2"
 source = { editable = "." }
 dependencies = [
     { name = "lmdb" },
