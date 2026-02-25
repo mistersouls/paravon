@@ -2,13 +2,13 @@
 requires = ["setuptools>=80.10.2"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["paractl", "paravon"]
-
+[tool.setuptools.packages.find]
+include = ["paravon*", "paractl*"]
+exclude = ["*tests*"]
 
 [project]
 name = "paravon"
-version = "0.0.1"
+version = "0.0.1.dev2"
 description = "Paravon is a leaderless, peer‑to‑peer distributed database blending strong per‑key consistency with deterministic global convergence."
 authors = [
     { name = "Souleymane BA", email = "soulsmister@gmail.com" }
@@ -21,7 +21,7 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.14",
   "Environment :: Console",
   "Operating System :: OS Independent",
   "Topic :: Database",
@@ -30,7 +30,6 @@ classifiers = [
   "Topic :: System :: Networking",
   "Topic :: Utilities",
 ]
-
 
 dependencies = [
     "msgpack==1.1.2",
@@ -52,6 +51,9 @@ dev = [
 Homepage = "https://github.com/mistersouls/paravon"
 Repository = "https://github.com/mistersouls/paravon"
 
+[project.scripts]
+paravon = "paravon.__main__:main"
+paractl = "paractl.__main__:main"
 
 [tool.pytest.ini_options]
 markers = [
