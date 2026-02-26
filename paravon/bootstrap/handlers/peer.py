@@ -39,3 +39,47 @@ async def gossip_checksums(data: dict) -> Message:
 async def gossip_bucket(data: dict) -> Message:
     core = get_core()
     return await core.node.apply_bucket(data)
+
+
+@app.request("healthz")
+async def healthz(data: dict) -> Message:
+    core = get_core()
+    node_info = await core.node.node_status()
+    source = node_info.data["node_id"]
+    return Message(type="healthz", data={"source": source})
+
+
+@app.request("replica/get")
+async def replica_get(data: dict) -> Message:
+    core = get_core()
+    return await core.storage.local_get(data)
+
+
+@app.request("replica/put")
+async def replica_put(data: dict) -> Message:
+    core = get_core()
+    return await core.storage.local_put(data)
+
+
+@app.request("replica/delete")
+async def replica_delete(data: dict) -> Message:
+    core = get_core()
+    return await core.storage.local_delete(data)
+
+
+@app.request("forward/get")
+async def forward_get(data: dict) -> Message:
+    core = get_core()
+    return await core.storage.get(data)
+
+
+@app.request("forward/put")
+async def forward_put(data: dict) -> Message:
+    core = get_core()
+    return await core.storage.put(data)
+
+
+@app.request("forward/delete")
+async def forward_delete(data: dict) -> Message:
+    core = get_core()
+    return await core.storage.delete(data)

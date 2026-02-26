@@ -6,7 +6,7 @@ import pytest
 import yaml
 from typing import Generator
 
-from paravon.core.gossip.table import BucketTable
+from paravon.core.cluster.table import BucketTable
 from paravon.core.models.membership import Membership, NodePhase, NodeSize
 from tests.fake.fake_transport import FakeTransport, JsonSerializer
 from tests.helpers import FakeParaConfig

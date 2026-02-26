@@ -93,27 +93,6 @@ class Ring:
         for i in range(len(self._vnodes)):
             yield self._vnodes[(start + i) % len(self._vnodes)]
 
-    def preference_list(self, vnode: VNode, replication_factor: int) -> list[VNode]:
-        """
-        Return a list of distinct nodes for replication, starting from the successor.
-
-        The method walks the ring in order and selects vnodes belonging to
-        different physical nodes, skipping additional vnodes from the same node.
-        This ensures that replicas are placed on distinct nodes.
-        """
-
-        result: list[VNode] = [vnode]
-        seen = {vnode.node_id}
-
-        for successor in self.iter_from(vnode):
-            if successor.node_id not in seen:
-                result.append(successor)
-                seen.add(successor.node_id)
-            if len(result) == replication_factor:
-                break
-
-        return result
-
     def __getitem__(self, i: int) -> VNode:
         return self._vnodes[i]
 

@@ -2,7 +2,7 @@ import pytest
 import zlib
 import json
 
-from paravon.core.gossip.bucket import Bucket
+from paravon.core.cluster.bucket import Bucket
 from tests.utils import make_member
 
 

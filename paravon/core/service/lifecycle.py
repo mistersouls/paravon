@@ -1,8 +1,9 @@
 import asyncio
 import logging
 
+from paravon.core.cluster.probe import ProbeManager
 from paravon.core.connections.pool import ClientConnectionPool
-from paravon.core.gossip.gossiper import Gossiper
+from paravon.core.cluster.gossiper import Gossiper
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.membership import Membership, NodePhase
@@ -23,6 +24,7 @@ class LifecycleService:
         peer_config: PeerConfig,
         peer_clients: ClientConnectionPool,
         meta_manager: NodeMetaManager,
+        probe_manager: ProbeManager,
         gossiper: Gossiper,
         spawner: TaskSpawner,
         topology_manager: TopologyManager,
@@ -42,6 +44,7 @@ class LifecycleService:
         self._topology = topology_manager
         self._serializer = serializer
         self._peer_clients = peer_clients
+        self._probe_manager = probe_manager
         self._loop = loop
 
         self._logger = logging.getLogger("core.service.lifecycle")
@@ -49,6 +52,9 @@ class LifecycleService:
     async def start(self, stop_event) -> None:
         await self.start_gossip(stop_event)
         self._logger.info("Started Gossip service")
+
+        await self.start_probe(stop_event)
+        self._logger.info("Started Probe service")
 
         self._spawner.spawn(
             self._peer_clients.dispatch_forever(stop_event)
@@ -131,3 +137,6 @@ class LifecycleService:
         cubic_controller = CubicRateController()
         rate_limiter = CubicRateLimiter(controller=cubic_controller)
         self._spawner.spawn(self._gossiper.run(stop_event, rate_limiter))
+
+    async def start_probe(self, stop_event: asyncio.Event) -> None:
+        self._spawner.spawn(self._probe_manager.run(stop_event))
