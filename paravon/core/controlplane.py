@@ -3,9 +3,10 @@ import logging
 import ssl
 
 from paravon.bootstrap.config.settings import ParavonConfig
+from paravon.core.cluster.probe import ProbeManager
 from paravon.core.connections.pool import ClientConnectionPool
 from paravon.core.facade import ParaCore
-from paravon.core.gossip.gossiper import Gossiper
+from paravon.core.cluster.gossiper import Gossiper
 from paravon.core.helpers.hlc import LWWConflictResolver
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import ServerConfig, PeerConfig
@@ -70,6 +71,11 @@ class ControlPlane:
             spawner=self._spawner,
             ssl_context=self._peer_config.client_ssl_ctx
         )
+        self._probe_manager = ProbeManager(
+            peer_clients=self._peer_clients,
+            meta_manager=self._meta_manager,
+            spawner=self._spawner
+        )
         self._gossiper = Gossiper(
             spawner=self._spawner,
             serializer=self._serializer,
@@ -92,7 +98,12 @@ class ControlPlane:
             backend_factory=self._storage_factory,
             serializer=self._serializer,
             conflict_resolver=LWWConflictResolver(),
-            topology=self._topology_manager
+            topology=self._topology_manager,
+            spawner=self._spawner,
+            probe_manager=self._probe_manager,
+            peer_clients=self._peer_clients,
+            meta_manager=self._meta_manager,
+            loop=self._loop,
         )
         self._lifecycle_service = LifecycleService(
             node_service=self._node_service,
@@ -104,7 +115,8 @@ class ControlPlane:
             gossiper=self._gossiper,
             peer_clients=self._peer_clients,
             serializer=self._serializer,
-            topology_manager=self._topology_manager
+            topology_manager=self._topology_manager,
+            probe_manager=self._probe_manager
         )
 
     def build_core(self) -> ParaCore:

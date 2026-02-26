@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from paravon.core.gossip.table import BucketTable
+from paravon.core.cluster.table import BucketTable
 from paravon.core.models.membership import Membership
 from paravon.core.space.ring import Ring
 

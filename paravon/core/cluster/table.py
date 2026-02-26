@@ -1,6 +1,6 @@
 import hashlib
 
-from paravon.core.gossip.bucket import Bucket
+from paravon.core.cluster.bucket import Bucket
 from paravon.core.models.membership import Membership, MembershipChange, MembershipDiff
 from paravon.core.ports.serializer import Serializer
 from paravon.core.service.meta import NodeMetaManager

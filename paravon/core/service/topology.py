@@ -2,7 +2,7 @@ import asyncio
 import logging
 import random
 
-from paravon.core.gossip.table import BucketTable
+from paravon.core.cluster.table import BucketTable
 from paravon.core.helpers.lock import RWLock
 from paravon.core.models.membership import Membership, MembershipDiff
 from paravon.core.models.state import PeerState

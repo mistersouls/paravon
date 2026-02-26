@@ -9,7 +9,7 @@ exclude = ["*tests*"]
 [project]
 name = "paravon"
 version = "0.0.1.dev2"
-description = "Paravon is a leaderless, peer‑to‑peer distributed database blending strong per‑key consistency with deterministic global convergence."
+description = "A fully leaderless distributed key‑value database built for massive horizontal scalability."
 authors = [
     { name = "Souleymane BA", email = "soulsmister@gmail.com" }
 ]
