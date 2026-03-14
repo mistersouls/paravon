@@ -1,13 +1,10 @@
 import asyncio
-import logging
 from typing import AsyncIterator
 
 from paravon.core.models.version import HLC
-from paravon.core.models.request import PutData
-from paravon.core.models.version import ValueVersion
 from paravon.core.ports.conflict import ConflictResolver
 from paravon.core.ports.serializer import Serializer
-from paravon.core.ports.storage import BackendStorageFactory, BackendStorage, Storage
+from paravon.core.ports.storage import BackendStorage, BackendStorageFactory
 from paravon.core.storage.codec import KeyCodec
 
 
@@ -19,69 +16,104 @@ class VersionedStorage:
 
     def __init__(
         self,
-        hlc: HLC,
         backend: BackendStorage,
+        hlc: HLC,
         serializer: Serializer,
         conflict_resolver: ConflictResolver,
     ) -> None:
-        self._hlc = hlc
         self._backend = backend
+        self._hlc = hlc
         self._serializer = serializer
         self._conflict_resolver = conflict_resolver
-        self._logger = logging.getLogger("core.storage.versioned")
 
-    async def get(self, keyspace: bytes, key: bytes) -> ValueVersion | None:
+    async def get(self, keyspace: bytes, key: bytes) -> bytes | None:
         kv = await self._get_latest_data_key_val(keyspace, key)
-        if kv is None or kv[1] == KeyCodec.TOMBSTONE:
-            return None
+        if kv is not None and kv[1]:
+            return kv[1]
+        return None
 
-        data_key, value = kv
-        parsed = KeyCodec.parse_data_key(keyspace, data_key)
-        if parsed is None:
-            self._logger.error(f"Error parsing internal key: {data_key.hex()}")
-            return None
+    async def put(self, keyspace: bytes, key: bytes, value: bytes) -> None:
+        items = self._get_put_items(keyspace, key, value)
+        await self._backend.put_many(items)
 
-        hlc_bytes, _ = parsed
-        return self._build_version(value, HLC.decode(hlc_bytes))
+    async def put_many(self, items: list[tuple[bytes, bytes, bytes]]) -> None:
+        ops = []
 
-    async def put(self, keyspace: bytes, key: bytes, value: bytes) -> ValueVersion:
-        data = self._get_put_items(keyspace, key, value)
-        await self._backend.put_many(data.items)
-        return self._build_version(value, data.hlc)
+        for keyspace, user_key, value in items:
+            ops.extend(self._get_put_items(keyspace, user_key, value))
 
-    async def delete(self, keyspace: bytes, key: bytes) -> ValueVersion:
-       return  await self.put(keyspace, key, KeyCodec.TOMBSTONE)
+        await self._backend.put_many(ops)
 
-    async def apply(
-        self,
-        keyspace: bytes,
-        key: bytes,
-        version: ValueVersion
-    ) -> ValueVersion:
-        self._hlc = self._hlc.tick_on_receive(version.hlc)
-        local = await self.get(keyspace, key)
-        candidates = [v for v in (local, version) if v is not None]
-        winner = self._conflict_resolver.resolve(candidates)
+    async def delete(self, keyspace: bytes, key: bytes) -> None:
+        await self.put(keyspace, key, KeyCodec.TOMBSTONE)
 
-        if winner != local:
-            hlc = winner.hlc
-            hlc_bytes = hlc.encode()
-            value = winner.value
-            data_key = KeyCodec.data_key(keyspace, key, hlc_bytes)
-            index_key = KeyCodec.index_key(keyspace, key, hlc_bytes)
-            items = self._atomic_put_items(data_key, index_key, hlc, value)
-            await self._backend.put_many(items)
-            return winner
-
-        return local
+    async def close(self) -> None:
+        await self._backend.close()
 
     async def iter(
         self,
         keyspace: bytes,
-        hlc: HLC,
+        prefix: bytes | None = None,
+        start: bytes | None = None,
+        limit: int | None = None,
+        reverse: bool = False,
+        batch_size: int = 1024,
+    ) -> AsyncIterator[tuple[bytes, bytes]]:
+        index_prefix = keyspace if prefix is None else prefix
+        async for index_key, _ in self._backend.iter(
+            keyspace=self.INDEXSPACE,
+            prefix=index_prefix,
+            start=start,
+            reverse=reverse,
+            batch_size=batch_size,
+            limit=limit,
+        ):
+            parsed = KeyCodec.parse_index_key(keyspace, index_key)
+            if parsed is None:
+                continue    # truncated or corrupted
+
+            hlc_bytes, user_key = parsed
+            data_key = KeyCodec.data_key(keyspace, user_key, hlc_bytes)
+            value = await self._backend.get(self.DATASPACE, data_key)
+            yield user_key, value
+
+    async def apply_remote(
+        self,
+        keyspace: bytes,
+        index_key: bytes,
+        value: bytes
+    ) -> HLC | None:
+        parsed = KeyCodec.parse_index_key(keyspace, index_key)
+        if parsed is None:
+            return None
+
+        r_hlc_bytes, user_key = parsed
+        r_hlc = HLC.decode(r_hlc_bytes)
+        self._hlc = self._hlc.tick_on_receive(r_hlc)
+
+        local_hlc = None
+        kv = await self._get_latest_data_key_val(keyspace, user_key)
+        if kv is not None:
+            local_hlc, _ = KeyCodec.parse_data_key(keyspace, kv[0])
+
+        candidates = [v for v in (local_hlc, r_hlc) if v is not None]
+        winner = self._conflict_resolver.resolve(candidates)
+
+        if winner != local_hlc:
+            r_data_key = KeyCodec.data_key(keyspace, user_key, r_hlc_bytes)
+            items = self._atomic_put_items(r_data_key, index_key, r_hlc, value)
+            await self._backend.put_many(items)
+            return winner
+
+        return local_hlc
+
+    async def iter_from_hlc(
+        self,
+        keyspace: bytes,
+        hlc: bytes,
         batch_size: int = 1024
-    ) -> AsyncIterator[tuple[bytes, ValueVersion]]:
-        start = KeyCodec.index_prefix(keyspace, hlc.encode())
+    ) -> AsyncIterator[tuple[bytes, bytes, bytes]]:
+        start = KeyCodec.index_prefix(keyspace, hlc)
 
         async for index_key, _ in self._backend.iter(
             keyspace=self.INDEXSPACE,
@@ -96,15 +128,8 @@ class VersionedStorage:
             c_hlc_bytes, user_key = parsed
             data_key = KeyCodec.data_key(keyspace, user_key, c_hlc_bytes)
             value = await self._backend.get(self.DATASPACE, data_key)
-            version = ValueVersion(
-                value=value,
-                hlc=HLC.decode(c_hlc_bytes),
-                is_tombstone=value == KeyCodec.TOMBSTONE,
-            )
-            yield user_key, version
 
-    async def close(self) -> None:
-        await self._backend.close()
+            yield index_key, user_key, value
 
     def _atomic_put_items(
         self,
@@ -121,18 +146,6 @@ class VersionedStorage:
         ]
         return items
 
-    @staticmethod
-    def _build_version(value: bytes | None, hlc: HLC) -> ValueVersion:
-        tombstone = value == KeyCodec.TOMBSTONE
-        if tombstone:
-            return ValueVersion.tombstone(hlc=hlc)
-
-        return ValueVersion(
-            value=value,
-            hlc=hlc,
-            is_tombstone=False,
-        )
-
     async def _get_latest_data_key_val(
         self,
         keyspace: bytes,
@@ -140,11 +153,11 @@ class VersionedStorage:
     ) -> tuple[bytes, bytes] | None:
         prefix = KeyCodec.data_prefix(keyspace, key)
         async for data_key, value in self._backend.iter(
-                keyspace=self.DATASPACE,
-                prefix=prefix,
-                reverse=True,
-                limit=1,
-                batch_size=1
+            keyspace=self.DATASPACE,
+            prefix=prefix,
+            reverse=True,
+            limit=1,
+            batch_size=1
         ):
             return data_key, value
 
@@ -155,19 +168,13 @@ class VersionedStorage:
         keyspace: bytes,
         key: bytes,
         value: bytes
-    ) -> PutData:
+    ) -> list[tuple[bytes, bytes, bytes]]:
         """Not thread-safe"""
         self._hlc = hlc = self._hlc.tick_local()
         hlc_bytes = hlc.encode()
         data_key = KeyCodec.data_key(keyspace, key, hlc_bytes)
         index_key = KeyCodec.index_key(keyspace, key, hlc_bytes)
-        items = self._atomic_put_items(data_key, index_key, hlc, value)
-        return PutData(
-            items=items,
-            data_key=data_key,
-            index_key=index_key,
-            hlc=hlc
-        )
+        return self._atomic_put_items(data_key, index_key, hlc, value)
 
 
 class VersionedStorageFactory:
@@ -183,14 +190,14 @@ class VersionedStorageFactory:
         self._node_id = node_id
         self._conflict_resolver = conflict_resolver
 
-        self._versioned: dict[str, Storage] = {}
+        self._versioned: dict[str, BackendStorage] = {}
         self._lock = asyncio.Lock()
 
     @property
     def max_keyspaces(self) -> int:
         return self._backend_factory.max_keyspaces
 
-    async def get(self, sid: str) -> Storage:
+    async def get(self, sid: str) -> BackendStorage:
         async with self._lock:
             if sid not in self._versioned:
                 backend = await self._backend_factory.get(sid)

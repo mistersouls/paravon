@@ -1,7 +1,9 @@
 from typing import Protocol, AsyncIterator
 
+from paravon.core.models.version import ValueVersion, HLC
 
-class Storage(Protocol):
+
+class BackendStorage(Protocol):
     """
     Minimal asynchronous interface for a keyspaced key–value backend.
     A Storage implementation exposes a simple byte-oriented KV store
@@ -86,7 +88,37 @@ class Storage(Protocol):
         """
 
 
-class StorageFactory(Protocol):
+class Storage(Protocol):
+    async def get(self, keyspace: bytes, key: bytes) -> ValueVersion | None:
+        ...
+
+    async def put(self, keyspace: bytes, key: bytes, value: bytes) -> ValueVersion:
+        ...
+
+    async def delete(self, keyspace: bytes, key: bytes) -> ValueVersion:
+        ...
+
+    async def apply(
+        self,
+        keyspace: bytes,
+        key: bytes,
+        version: ValueVersion
+    ) -> ValueVersion:
+        ...
+
+    def iter(
+        self,
+        keyspace: bytes,
+        hlc: HLC,
+        batch_size: int = 1024
+    ) -> AsyncIterator[tuple[bytes, ValueVersion]]:
+        ...
+
+    async def close(self) -> None:
+        ...
+
+
+class BackendStorageFactory(Protocol):
     """
     Factory interface for creating Storage instances. A factory is
     responsible for producing independent Storage objects, typically
@@ -111,7 +143,7 @@ class StorageFactory(Protocol):
         and adapt their keyspace allocation strategy accordingly.
         """
 
-    async def get(self, sid: str) -> Storage:
+    async def get(self, sid: str) -> BackendStorage:
         """
         Return a Storage instance associated with the given storage
         identifier `sid`.
@@ -133,3 +165,15 @@ class StorageFactory(Protocol):
 
         The method must not block the event loop.
         """
+
+
+class StorageFactory(Protocol):
+    @property
+    def max_keyspaces(self) -> int:
+        ...
+
+    async def get(self, sid: str) -> Storage:
+        ...
+
+    async def close(self) -> None:
+        ...

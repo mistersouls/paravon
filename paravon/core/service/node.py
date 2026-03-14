@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from paravon.core.gossip.gossiper import Gossiper
+from paravon.core.cluster.gossiper import Gossiper
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.message import Message

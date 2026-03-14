@@ -17,10 +17,16 @@ class TaskSpawner:
     execution to the provided event loop.
     """
 
-    def __init__(self, loop: asyncio.AbstractEventLoop):
+    def __init__(self, loop: asyncio.AbstractEventLoop | None = None):
         self._loop = loop
         self._tasks: set[asyncio.Task[Any]] = set()
         self._logger = logging.getLogger("core.helpers.spawn")
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+        return self._loop
 
     @property
     def remaining_tasks(self) -> int:
@@ -59,7 +65,7 @@ class TaskSpawner:
         The task is registered, given a completion callback, and scheduled
         immediately on the provided event loop.
         """
-        task = self._loop.create_task(coro)
+        task = self.loop.create_task(coro)
         task.add_done_callback(self.on_done)
         self._tasks.add(task)
         return task

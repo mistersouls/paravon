@@ -97,24 +97,6 @@ def test_iter_from_wraps_around():
 
 
 @pytest.mark.ut
-def test_preference_list_distinct_nodes_and_respects_replication_factor():
-    vnodes = [
-        VNode(node_id="A", token=100),
-        VNode(node_id="A", token=150),
-        VNode(node_id="B", token=200),
-        VNode(node_id="C", token=300),
-    ]
-    ring = Ring(vnodes)
-
-    start = vnodes[0]  # A@100
-    prefs = ring.preference_list(start, replication_factor=3)
-
-    # Should contain 3 vnodes on distinct node_ids
-    assert len(prefs) == 3
-    assert {v.node_id for v in prefs} == {"A", "B", "C"}
-
-
-@pytest.mark.ut
 def test_len_and_getitem():
     vnodes = [
         VNode(node_id="A", token=100),

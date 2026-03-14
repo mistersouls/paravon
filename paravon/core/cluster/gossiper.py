@@ -52,6 +52,7 @@ class Gossiper:
         local = await self._topology.get_checksums()
         remote_checksums = data["checksums"]
         peer = Membership.from_dict(data["source"])
+
         client = await self._get_client(peer)
 
         for bucket_id, remote_crc in remote_checksums.items():

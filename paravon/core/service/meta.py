@@ -3,7 +3,7 @@ from typing import Any
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.membership import NodePhase, Membership, NodeSize
 from paravon.core.ports.serializer import Serializer
-from paravon.core.ports.storage import Storage, StorageFactory
+from paravon.core.ports.storage import BackendStorage, BackendStorageFactory
 
 
 class NodeMetaManager:
@@ -25,7 +25,7 @@ class NodeMetaManager:
     def __init__(
         self,
         peer_config: PeerConfig,
-        storage_factory: StorageFactory,
+        storage_factory: BackendStorageFactory,
         serializer: Serializer
     ) -> None:
         self._peer_config = peer_config
@@ -153,7 +153,7 @@ class NodeMetaManager:
             peer_address=peer_address
         )
 
-    async def _get_backend(self) -> Storage:
+    async def _get_backend(self) -> BackendStorage:
         return await self._storage_factory.get(self.SYS_SID)
 
     async def _get(self, key: str, default: Any = None) -> Any:

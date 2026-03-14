@@ -1,9 +1,9 @@
 import asyncio
 
-from paravon.core.ports.storage import Storage, StorageFactory
+from paravon.core.ports.storage import BackendStorage, BackendStorageFactory
 
 
-class FakeStorage(Storage):
+class FakeBackendStorage(BackendStorage):
     """
     A simple in-memory storage implementation for testing.
     It mimics the async get/put/delete interface of the real Storage.
@@ -28,17 +28,17 @@ class FakeStorage(Storage):
 class FakeStorageFactory:
     def __init__(self, max_dbs: int = 10) -> None:
         self._max_dbs = max_dbs
-        self._backends: dict[str, FakeStorage] = {}
+        self._backends: dict[str, FakeBackendStorage] = {}
         self._lock = asyncio.Lock()
 
     @property
     def max_keyspaces(self) -> int:
         return self._max_dbs
 
-    async def get(self, sid: str) -> Storage:
+    async def get(self, sid: str) -> BackendStorage:
         async with self._lock:
             if sid not in self._backends:
-                self._backends[sid] = FakeStorage()
+                self._backends[sid] = FakeBackendStorage()
             return self._backends[sid]
 
     async def close(self) -> None:
