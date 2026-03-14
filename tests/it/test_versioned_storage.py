@@ -2,9 +2,10 @@ import asyncio
 
 import pytest
 
-from paravon.core.helpers.hlc import HLC, LWWConflictResolver
+from paravon.core.helpers.lww import LWWConflictResolver
+from paravon.core.models.version import HLC
 from paravon.core.storage.codec import KeyCodec
-from paravon.core.storage.versioned import VersionedStorage
+from paravon.core.storage.deprecated_versioned import VersionedStorage
 from paravon.infra.lmdb_storage.aiobackend import LMDBStorage
 from paravon.infra.msgpack_serializer import MsgPackSerializer
 

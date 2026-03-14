@@ -6,7 +6,7 @@ from paravon.core.models.config import PeerConfig
 from paravon.core.models.membership import NodePhase, NodeSize
 from paravon.core.routing.app import RoutedApplication
 from paravon.core.service.meta import NodeMetaManager
-from tests.fake.fake_storage import FakeStorageFactory, FakeStorage
+from tests.fake.fake_storage import FakeStorageFactory, FakeBackendStorage
 
 
 @pytest.fixture
@@ -99,7 +99,7 @@ async def test_get_membership_raises_on_node_id_mismatch(
 @pytest.mark.asyncio
 async def test_get_membership_uses_cache(manager, storage_factory):
     storage = cast(
-        FakeStorage,
+        FakeBackendStorage,
         await storage_factory.get(NodeMetaManager.SYS_SID)
     )
     m1 = await manager.get_membership()
@@ -131,7 +131,7 @@ async def test_set_phase_initializes_membership_if_needed(
 @pytest.mark.asyncio
 async def test_set_phase_updates_cached_membership(manager, storage_factory):
     storage = cast(
-        FakeStorage,
+        FakeBackendStorage,
         await storage_factory.get(NodeMetaManager.SYS_SID)
     )
     await manager.get_membership()

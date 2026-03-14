@@ -12,6 +12,18 @@ from paravon.core.models.request import (
 from paravon.core.models.config import PeerConfig
 from paravon.core.space.partition import PartitionPlacement, LogicalPartition
 from paravon.core.space.vnode import VNode
+from paravon.core.models.version import ValueVersion, HLC
+
+
+def make_fake_version(
+    value: bytes | None = b"v",
+    node: str = "A",
+    tombstone: bool = False,
+) -> ValueVersion:
+    hlc = HLC.initial(node_id=node)
+    if tombstone:
+        return ValueVersion.tombstone(hlc=hlc, origin=node)
+    return ValueVersion.from_bytes(value=value, hlc=hlc, origin=node)
 
 
 @pytest.fixture
@@ -123,14 +135,15 @@ async def test_coordinate_get_local_and_remote_success(mocks):
         local="A", remotes=("B", "C")
     ))
 
-    mocks["storage"].get.return_value = b"v"
+    fake_version = make_fake_version()
+    mocks["storage"].get.return_value = fake_version
 
     async def fake_send(replica, msg):
         await asyncio.sleep(0)
         coordinator._handle_ok({
-            "value": b"v",
-            "source": replica,
-            **msg.data
+            "version": fake_version.to_dict(),
+            "request_id": msg.data["request_id"],
+            "source": replica
         })
 
     mocks["pool"].send.side_effect = fake_send
@@ -138,7 +151,8 @@ async def test_coordinate_get_local_and_remote_success(mocks):
     message = await coordinator.get(request, placement)
 
     assert message.type == "ok"
-    assert message.data["value"] == b"v"
+    assert len(message.data["versions"]) == 1
+    assert message.data["versions"][0]["value"] == b"v"
 
 
 @pytest.mark.ut
@@ -152,9 +166,11 @@ async def test_forward_get_to_primary(mocks):
         local=None, remotes=("A", "B")
     ))
 
+    fake_version = make_fake_version()
+
     async def fake_send(replica, msg):
         coordinator._handle_ok({
-            "value": b"v",
+            "version": fake_version.to_dict(),
             "request_id": msg.data["request_id"],
             "source": replica,
         })
@@ -164,7 +180,7 @@ async def test_forward_get_to_primary(mocks):
     message = await coordinator.get(request, placement)
 
     assert message.type == "ok", repr(message)
-    assert message.data["value"] == b"v"
+    assert message.data["version"]["value"] == b"v"
 
 
 @pytest.mark.ut
@@ -178,10 +194,12 @@ async def test_coordinate_put_success(mocks):
         local="A", remotes=("B",)
     ))
 
-    mocks["storage"].put.return_value = None
+    fake_version = make_fake_version()
+    mocks["storage"].put.return_value = fake_version
 
     async def fake_send(replica, msg):
         coordinator._handle_ok({
+            "version": fake_version.to_dict(),
             "request_id": msg.data["request_id"],
             "source": replica
         })
@@ -204,7 +222,8 @@ async def test_coordinate_delete_success(mocks):
         local="A", remotes=()
     ))
 
-    mocks["storage"].delete.return_value = None
+    fake_version = make_fake_version(value=None, tombstone=True)
+    mocks["storage"].delete.return_value = fake_version
 
     message = await coordinator.delete(request, placement)
 
@@ -222,8 +241,11 @@ async def test_forward_put(mocks):
         local=None, remotes=("A", "B")
     ))
 
+    fake_version = make_fake_version()
+
     async def fake_send(replica, msg):
         coordinator._handle_ok({
+            "version": fake_version.to_dict(),
             "request_id": msg.data["request_id"],
             "source": replica
         })
@@ -246,8 +268,11 @@ async def test_forward_delete(mocks):
         local=None, remotes=("A", "B")
     ))
 
+    fake_version = make_fake_version(value=None, tombstone=True)
+
     async def fake_send(replica, msg):
         coordinator._handle_ok({
+            "version": fake_version.to_dict(),
             "request_id": msg.data["request_id"],
             "source": replica
         })
@@ -294,11 +319,12 @@ async def test_quorum_exact_threshold(mocks):
         local="A", remotes=("B",)
     ))
 
-    mocks["storage"].get.return_value = b"v"
+    fake_version = make_fake_version()
+    mocks["storage"].get.return_value = fake_version
 
     async def fake_send(replica, msg):
         coordinator._handle_ok({
-            "value": b"v",
+            "version": fake_version.to_dict(),
             "request_id": msg.data["request_id"],
             "source": replica
         })
@@ -307,7 +333,7 @@ async def test_quorum_exact_threshold(mocks):
 
     message = await coordinator.get(request, placement)
 
-    assert message.type == "ok"
+    assert message.type == "ok", repr(message)
 
 
 @pytest.mark.ut
@@ -321,7 +347,8 @@ async def test_timeout_waiting_for_quorum(mocks):
         local="A", remotes=("B",)
     ))
 
-    mocks["storage"].get.return_value = b"v"
+    fake_version = make_fake_version()
+    mocks["storage"].get.return_value = fake_version
 
     async def never_reply(*_):
         await asyncio.sleep(1)
@@ -345,7 +372,8 @@ async def test_remote_send_exception_marks_suspect(mocks):
         local="A", remotes=("B",)
     ))
 
-    mocks["storage"].put.return_value = None
+    fake_version = make_fake_version()
+    mocks["storage"].put.return_value = fake_version
 
     async def failing_send(*_):
         raise RuntimeError("network error")

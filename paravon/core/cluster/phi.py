@@ -22,6 +22,10 @@ class FailureDetector:
         self._phi_cap = phi_cap
         self._arrival_times = deque(maxlen=window_size)
 
+    @property
+    def total_samples(self) -> int:
+        return len(self._arrival_times)
+
     def record_heartbeat(self, timestamp: float | None = None) -> None:
         self._arrival_times.append(timestamp or time.time())
 
@@ -65,7 +69,7 @@ class FailureDetector:
         now: float | None = None,
         min_samples: int | None = None
     ) -> bool:
-        if min_samples and min_samples > len(self._arrival_times):
+        if min_samples and min_samples > self.total_samples:
             return True
         return self.compute_phi(now) >= self._threshold
 

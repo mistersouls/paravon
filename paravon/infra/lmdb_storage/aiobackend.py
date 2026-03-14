@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import AsyncIterator
 
-from paravon.core.ports.storage import Storage
+from paravon.core.ports.storage import BackendStorage
 from paravon.core.storage.codec import KeyCodec
 from paravon.infra.lmdb_storage.backend import LMDBBackend
 
@@ -145,7 +145,7 @@ class LMDBStorageFactory:
     def max_keyspaces(self) -> int:
         return self._max_dbs
 
-    async def get(self, sid: str) -> Storage:
+    async def get(self, sid: str) -> BackendStorage:
         async with self._backends_lock:
             if sid not in self._backends:
                 path = self._path / sid

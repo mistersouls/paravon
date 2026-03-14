@@ -49,46 +49,36 @@ async def healthz(data: dict) -> Message:
     return Message(type="healthz", data={"source": source})
 
 
-@app.request("replica/get")
-async def replica_get(data: dict) -> Message:
+@app.request("read")
+async def read(data: dict) -> Message:
     core = get_core()
-    return await core.storage.local_get(data)
+    return await core.storage.read(data)
 
 
-@app.request("replica/put")
-async def replica_put(data: dict) -> Message:
+@app.request("apply")
+async def apply(data: dict) -> Message:
     core = get_core()
-    return await core.storage.local_put(data)
+    return await core.storage.apply(data)
 
 
-@app.request("replica/delete")
-async def replica_delete(data: dict) -> Message:
-    core = get_core()
-    return await core.storage.local_delete(data)
-
-
-@app.request("forward/get")
+@app.request("forward/fetch")
 async def forward_get(data: dict) -> Message:
     core = get_core()
     msg = await core.storage.get(data)
     if msg.type == "ok":
-        return Message(type="forward/get", data=msg.data)
+        return Message(type="forward/fetch", data=msg.data)
     return msg
 
 
-@app.request("forward/put")
+@app.request("forward/write")
 async def forward_put(data: dict) -> Message:
     core = get_core()
-    msg = await core.storage.put(data)
-    if msg.type == "ok":
-        return Message(type="forward/put", data=msg.data)
-    return msg
+    value = data.get("value")
+    if value is not None:
+        msg = await core.storage.put(data)
+    else:
+        msg = await core.storage.delete(data)
 
-
-@app.request("forward/delete")
-async def forward_delete(data: dict) -> Message:
-    core = get_core()
-    msg = await core.storage.delete(data)
     if msg.type == "ok":
-        return Message(type="forward/delete", data=msg.data)
+        return Message(type="forward/write", data=msg.data)
     return msg

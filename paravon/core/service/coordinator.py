@@ -1,20 +1,20 @@
 import asyncio
 import logging
 
-
 from paravon.core.cluster.probe import ProbeManager
 from paravon.core.connections.pool import ClientConnectionPool
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.message import Message
 from paravon.core.models.request import (
-    GetRequest,
     RequestContext,
+    GetRequest,
+    DeleteRequest,
     PutRequest,
     Request,
-    DeleteRequest,
     ReplicaSet
 )
+from paravon.core.models.version import ValueVersion
 from paravon.core.ports.storage import Storage
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.topology import TopologyManager
@@ -123,10 +123,17 @@ class Coordinator:
             f"{key.hex()} with replicas={ctx.replicas.candidates}"
         )
         tasks = [self._spawner.spawn(self._local_read(keyspace, key, ctx))]
+        message = Message(
+            type="read",
+            data={
+                "key": key,
+                "keyspace": keyspace,
+                "request_id": ctx.request_id,
+                "quorum": ctx.quorum,
+            },
+        )
         for replica in ctx.replicas.remotes:
-            task = self._spawner.spawn(
-                self._remote_get(replica, keyspace, key, ctx)
-            )
+            task = self._spawner.spawn(self._send_message(replica, message, ctx))
             tasks.append(task)
 
         return await self._wait_remote(ctx, tasks)
@@ -154,18 +161,22 @@ class Coordinator:
         key: bytes,
         ctx: RequestContext
     ) -> Message:
-        """
-        Forward the GET to the primary coordinator and wait for its result.
-
-        From this node's perspective, quorum is 1: the primary's response,
-        which itself is based on its own read quorum.
-        """
         self._logger.info(
             f"[{ctx.request_id}] Forwarding request "
             f"to primary {ctx.replicas.primary}"
         )
+        message = Message(
+            type="forward/fetch",
+            data={
+                "key": key,
+                "keyspace": keyspace,
+                "request_id": ctx.request_id,
+                "quorum": ctx.quorum,
+                "timeout": ctx.timeout
+            },
+        )
         task = self._spawner.spawn(
-            self._remote_get(ctx.replicas.primary, keyspace, key, ctx)
+            self._send_message(ctx.replicas.primary, message, ctx)
         )
         return await self._wait_remote(ctx, [task])
 
@@ -253,12 +264,14 @@ class Coordinator:
             f"[{ctx.request_id}] Coordinating WRITE on {key.hex()} "
             f"with replicas={ctx.replicas.candidates}"
         )
-        tasks = [self._spawner.spawn(self._local_write(keyspace, key, ctx, value))]
-        for replica in ctx.replicas.remotes:
-            task = self._spawner.spawn(
-                self._remote_write(replica, keyspace, key, ctx, value)
-            )
-            tasks.append(task)
+        tasks = []
+        version = await self._try_primary_write(keyspace, key, ctx, value)
+        if version is not None:
+            for replica in ctx.replicas.remotes:
+                task = self._spawner.spawn(
+                    self._remote_apply(replica, keyspace, key, version, ctx)
+                )
+                tasks.append(task)
 
         return await self._wait_remote(ctx, tasks)
 
@@ -269,14 +282,38 @@ class Coordinator:
         ctx: RequestContext,
         value: bytes | None = None,
     ) -> Message:
-        self._logger.info(
-            f"[{ctx.request_id}] Forwarding request "
-            f"to primary {ctx.replicas.primary}"
+        data = {
+            "keyspace": keyspace,
+            "key": key,
+            "value": value,
+            "request_id": ctx.request_id,
+            "quorum": ctx.quorum,
+            "timeout": ctx.timeout,
+        }
+        message = Message(type="forward/write", data=data)
+        replica = ctx.replicas.primary
+        await self._send_message(replica, message, ctx)
+        return await self._wait_remote(ctx, [])
+
+    async def _remote_apply(
+        self,
+        replica: str,
+        keyspace: bytes,
+        key: bytes,
+        version: ValueVersion,
+        ctx: RequestContext,
+    ) -> None:
+        data = {
+            "keyspace": keyspace,
+            "key": key,
+            "version": version.to_dict(),
+            "request_id": ctx.request_id
+        }
+        message = Message(type="apply", data=data)
+        self._logger.debug(
+            f"[{ctx.request_id}] Sending {message.type} to {replica}"
         )
-        task = self._spawner.spawn(
-            self._remote_write(ctx.replicas.primary, keyspace, key, ctx, value)
-        )
-        return await self._wait_remote(ctx, [task])
+        await self._send_message(replica, message, ctx)
 
     def _handle_ko(self, data: dict) -> None:
         request_id = data["request_id"]
@@ -341,8 +378,8 @@ class Coordinator:
                 f"[{ctx.request_id}] Quorum reached "
                 f"({ctx.quorum}/{len(ctx.replicas.candidates)})"
             )
-            value = self._resolve_read(ctx.responses)
-            ctx.future.set_result(value)
+            message = self._resolve_message(request_id, ctx.responses)
+            ctx.future.set_result(message)
             self._ctx.pop(request_id, None)
             return
 
@@ -366,118 +403,111 @@ class Coordinator:
         )
 
         try:
-            value = await self._storage.get(keyspace, key)
-            self._handle_ok({"value": value, "request_id": ctx.request_id})
-        except Exception as ex:
-            ctx.failures += 1
-            self._logger.error(
-                f"[{ctx.request_id}] Local storage error: {ex}"
-            )
-
-    async def _local_write(
-        self,
-        keyspace: bytes,
-        key: bytes,
-        ctx: RequestContext,
-        value: bytes | None = None,
-    ) -> None:
-        self._logger.debug(
-            f"[{ctx.request_id}] Local write key={key.hex()}"
-        )
-
-        try:
-            if value is not None:
-                await self._storage.put(keyspace, key, value)
-            else:
-                await self._storage.delete(keyspace, key)
+            version = await self._storage.get(keyspace, key)
             self._handle_ok({
+                "version": version.to_dict() if version else None,
                 "request_id": ctx.request_id,
                 "source": ctx.replicas.local
             })
         except Exception as ex:
-            ctx.failures += 1
             self._logger.error(
                 f"[{ctx.request_id}] Local storage error: {ex}"
             )
-
-    def _subscribe_messages(self) -> None:
-        self._peer_clients.subscribe("replica/get", self)
-        self._peer_clients.subscribe("replica/put", self)
-        self._peer_clients.subscribe("replica/delete", self)
-        self._peer_clients.subscribe("forward/get", self)
-        self._peer_clients.subscribe("forward/put", self)
-        self._peer_clients.subscribe("forward/delete", self)
-
-    async def _remote_get(
-        self,
-        replica: str,
-        keyspace: bytes,
-        key: bytes,
-        ctx: RequestContext,
-    ) -> None:
-        kind = "replica" if ctx.replicas.has_local() else "forward"
-
-        self._logger.debug(
-            f"[{ctx.request_id}] Sending {kind}/get to {replica}"
-        )
-
-        try:
-            message = Message(
-                type=f"{kind}/get",
-                data={
-                    "key": key,
-                    "keyspace": keyspace,
-                    "request_id": ctx.request_id,
-                    "quorum": ctx.quorum,
-                },
-            )
-            await self._peer_clients.send(replica, message)
-        except Exception as ex:
-            ctx.failures += 1
-            await self._probe_manager.mark_suspect(replica)
-            self._logger.error(
-                f"[{ctx.request_id}] Remote failed on {replica}: {ex}"
-            )
+            self._handle_ko({
+                "request_id": ctx.request_id,
+                "source": ctx.replicas.local
+            })
 
     @staticmethod
-    def _resolve_read(responses: list[dict]) -> Message:
-        # For now: a naive approach, we just take the first response.
-        # Later: compare versions, vector clocks, and so on.
-        return Message(type="ok", data=responses[0])
+    def _resolve_message(
+        request_id: str,
+        responses: list[dict],
+    ) -> Message:
+        instances = [
+            ValueVersion.from_dict(r["version"])
+            for r in responses
+            if r["version"] is not None
+        ]
+        versions = [v.to_dict() for v in set(instances)]
+        data = {"versions": versions, "request_id": request_id}
+        return Message(type="ok", data=data)
 
-    async def _remote_write(
+    async def _send_message(
         self,
-        replica: str,
+        peer: str,
+        message: Message,
+        ctx: RequestContext
+    ) -> None:
+        self._logger.debug(f"[{ctx.request_id}] Sending {message.type} to {peer}")
+
+        try:
+            await self._peer_clients.send(peer, message)
+        except Exception as ex:
+            await self._probe_manager.mark_suspect(peer)
+            self._logger.error(f"[{ctx.request_id}] Remote failed on {peer}: {ex}")
+            self._handle_ko({
+                "request_id": ctx.request_id,
+                "source": peer,
+            })
+
+    def _subscribe_messages(self) -> None:
+        self._peer_clients.subscribe("read", self)
+        self._peer_clients.subscribe("apply", self)
+        self._peer_clients.subscribe("forward/fetch", self)
+        self._peer_clients.subscribe("forward/write", self)
+
+    async def _try_primary_write(
+        self,
         keyspace: bytes,
         key: bytes,
         ctx: RequestContext,
         value: bytes | None = None,
-    ) -> None:
-        data = {
-            "keyspace": keyspace,
-            "key": key,
-            "request_id": ctx.request_id,
-        }
-        kind = "replica" if ctx.replicas.has_local() else "forward"
-        if value is not None:
-            data["value"] = value
-            action = "put"
-        else:
-            action = "delete"
+    ) -> ValueVersion | None:
+        """
+        Attempt to write on the primary replica to generate
+        the canonical ValueVersion.
 
-        self._logger.debug(
-            f"[{ctx.request_id}] Sending {kind}/{action} to {replica}"
-        )
+        Current behavior (no hinted handoff yet):
+          - The primary MUST generate the canonical version for this request.
+          - If the primary write succeeds, this version is used for replication.
+          - If the primary write fails, the entire request fails immediately.
+            Remote replicas are NOT allowed to generate their own versions.
+            This guarantees that a single request never produces multiple versions.
+
+        Future behavior (once hinted handoff is implemented):
+          - If the primary is temporarily unavailable, another node will store
+            the canonical version on its behalf (hinted handoff).
+          - The request will still fail from the client's perspective, but
+            replication will remain consistent and no divergent versions will appear.
+        """
+
+        self._logger.debug(f"[{ctx.request_id}] Primary write key={key.hex()}")
 
         try:
-            message = Message(type=f"{kind}/{action}", data=data)
-            await self._peer_clients.send(replica, message)
+            if value is not None:
+                version = await self._storage.put(keyspace, key, value)
+            else:
+                version = await self._storage.delete(keyspace, key)
+
+            self._handle_ok({
+                "request_id": ctx.request_id,
+                "source": ctx.replicas.local,
+                "version": version.to_dict(),
+            })
+
+            return version
+
         except Exception as ex:
             ctx.failures += 1
-            await self._probe_manager.mark_suspect(replica)
             self._logger.error(
-                f"[{ctx.request_id}] Remote {action} failed on {replica}: {ex}"
+                f"[{ctx.request_id}] Primary storage error: {ex}"
             )
+            message = Message(
+                type="ko",
+                data={"message": "Can't obtain value version from primary replica"}
+            )
+            ctx.future.set_result(message)
+            return None
 
     async def _wait_remote(
         self,

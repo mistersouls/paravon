@@ -5,26 +5,28 @@ from typing import AsyncIterator
 
 from paravon.core.cluster.probe import ProbeManager
 from paravon.core.connections.pool import ClientConnectionPool
-from paravon.core.helpers.hlc import HLC, ConflictResolver
+from paravon.core.models.version import HLC
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.message import Message
 from paravon.core.models.request import GetRequest, PutRequest, DeleteRequest
+from paravon.core.models.version import ValueVersion
+from paravon.core.ports.conflict import ConflictResolver
 from paravon.core.ports.serializer import Serializer
-from paravon.core.ports.storage import StorageFactory
+from paravon.core.ports.storage import BackendStorageFactory
 from paravon.core.service.coordinator import Coordinator
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.topology import TopologyManager
 from paravon.core.space.partition import PartitionPlacement, Partitioner
 from paravon.core.storage.partitioned import PartitionedStorage
-from paravon.core.storage.versioned import VersionedStorageFactory, VersionedStorage
+from paravon.core.storage.versioned import VersionedStorageFactory
 
 
 class StorageService:
     def __init__(
         self,
         peer_config: PeerConfig,
-        backend_factory: StorageFactory,
+        backend_factory: BackendStorageFactory,
         serializer: Serializer,
         topology: TopologyManager,
         conflict_resolver: ConflictResolver,
@@ -72,7 +74,7 @@ class StorageService:
             request_id=data.get("request_id", str(uuid.uuid4())),
             key=key,
             quorum=data.get("quorum", 2),
-            timeout=data.get("timeout", 0.05),
+            timeout=data.get("timeout", 600),
         )
         return await self._coordinator.get(request, placement)
 
@@ -86,7 +88,7 @@ class StorageService:
             key=key,
             value=value,
             quorum=data.get("quorum", 2),
-            timeout=data.get("timeout", 600),
+            timeout=data.get("timeout", 0.05),
         )
         return await self._coordinator.put(request, placement)
 
@@ -102,75 +104,45 @@ class StorageService:
         )
         return await self._coordinator.delete(request, placement)
 
-    async def local_get(self, data: dict) -> Message:
+    async def read(self, data: dict) -> Message:
         key = data["key"]
         request_id = data.get("request_id", str(uuid.uuid4()))
         placement = await self._find_key_placement(key)
-        value = await self._storage.get(placement.keyspace, key)
+        version = await self._storage.get(placement.keyspace, key)
         membership = await self._meta_manager.get_membership()
         return Message(
-            type="replica/get",
+            type="read",
             data={
-                "value": value,
+                "version": version.to_dict() if version else None,
                 "request_id": request_id,
                 "source": membership.node_id
             },
         )
 
-    async def local_put(self, data: dict) -> Message:
-        key = data["key"]
-        value = data["value"]
-        request_id = data.get("request_id", str(uuid.uuid4()))
-        placement = await self._find_key_placement(key)
-        await self._storage.put(placement.keyspace, key, value)
-        membership = await self._meta_manager.get_membership()
-        return Message(
-            type="replica/put",
-            data={
-                "request_id": request_id,
-                "source": membership.node_id
-            },
-        )
-
-    async def local_delete(self, data: dict) -> Message:
+    async def apply(self, data: dict) -> Message:
+        keyspace = data["keyspace"]
         key = data["key"]
         request_id = data.get("request_id", str(uuid.uuid4()))
-        placement = await self._find_key_placement(key)
-        await self._storage.delete(placement.keyspace, key)
+        l_version = ValueVersion.from_dict(data["version"])
+        version = await self._storage.apply(keyspace, key, l_version)
         membership = await self._meta_manager.get_membership()
         return Message(
-            type="replica/delete",
+            type="apply",
             data={
+                "version": version.to_dict(),
                 "request_id": request_id,
                 "source": membership.node_id
-            },
+            }
         )
 
-    async def apply(
+    async def iter_since_hlc(
         self,
-        keyspace: bytes,
-        index_key: bytes,
-        value: bytes,
-    ) -> HLC | None:
-        backend = await self._storage.select_backend(keyspace)
-        if isinstance(backend, VersionedStorage):
-            return await backend.apply_remote(keyspace, index_key, value)
-
-        raise RuntimeError("Backend storage does not support remote apply")
-
-    async def get_since_hlc(
-        self, data: dict
-    ) -> AsyncIterator[tuple[bytes, bytes, bytes]]:
+        data: dict
+    ) -> AsyncIterator[tuple[bytes, ValueVersion]]:
         keyspace = data["keyspace"]
         hlc = HLC.from_dict(data["hlc"])
-        backend = await self._storage.select_backend(keyspace)
-        if not isinstance(backend, VersionedStorage):
-            raise RuntimeError("Backend storage does not support temporal get")
-
-        async for index_key, user_key, value in backend.iter_from_hlc(
-            keyspace, hlc.encode()
-        ):
-            yield index_key, user_key, value
+        async for key, version in self._storage.iter(keyspace, hlc):
+            yield key, version
 
     async def _find_key_placement(self, key: bytes) -> PartitionPlacement:
         ring = await self._topology.get_ring()

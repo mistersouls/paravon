@@ -1,10 +1,17 @@
 import pytest
-
 from paravon.core.storage.partitioned import PartitionedStorage
+from paravon.core.models.version import ValueVersion, HLC
+
+
+def make_version(value: bytes | None, node="A", tombstone=False):
+    hlc = HLC.initial(node)
+    if tombstone:
+        return ValueVersion.tombstone(hlc=hlc, origin=node)
+    return ValueVersion.from_bytes(value=value, hlc=hlc, origin=node)
 
 
 class DummyStorage:
-    """Simple in‑memory backend for testing PartitionedStorage."""
+    """Simple in‑memory backend returning ValueVersion objects."""
     def __init__(self):
         self.data = {}
 
@@ -12,22 +19,23 @@ class DummyStorage:
         return self.data.get((keyspace, key))
 
     async def put(self, keyspace, key, value):
-        self.data[(keyspace, key)] = value
-
-    async def put_many(self, items):
-        for keyspace, key, value in items:
-            self.data[(keyspace, key)] = value
+        version = make_version(value)
+        self.data[(keyspace, key)] = version
+        return version
 
     async def delete(self, keyspace, key):
-        self.data.pop((keyspace, key), None)
+        version = make_version(None, tombstone=True)
+        self.data[(keyspace, key)] = version
+        return version
 
-    async def iter(self, keyspace, prefix=None, start=None, limit=None, reverse=False, batch_size=1024):
-        for (ks, key), value in self.data.items():
-            if ks != keyspace:
-                continue
-            if prefix is not None and not key.startswith(prefix):
-                continue
-            yield key, value
+    async def apply(self, keyspace, key, version):
+        self.data[(keyspace, key)] = version
+        return version
+
+    async def iter(self, keyspace, hlc, batch_size=1024):
+        for (ks, key), version in self.data.items():
+            if ks == keyspace:
+                yield key, version
 
     async def close(self):
         pass
@@ -57,12 +65,8 @@ def storage(serializer):
 @pytest.mark.ut
 @pytest.mark.asyncio
 async def test_partition_routing(storage):
-    # keyspace "0001" → pid = 1 → env_index = 1 // 4 = 0
-    backend1 = await storage.select_backend(b"0001")
-
-    # keyspace "0008" → pid = 8 → env_index = 8 // 4 = 2
-    backend2 = await storage.select_backend(b"0008")
-
+    backend1 = await storage._select_backend(b"0001")  # pid=1 → env=0
+    backend2 = await storage._select_backend(b"0008")  # pid=8 → env=2
     assert backend1 is not backend2
 
 
@@ -70,8 +74,9 @@ async def test_partition_routing(storage):
 @pytest.mark.asyncio
 async def test_put_get(storage):
     await storage.put(b"0001", b"a", b"hello")
-    val = await storage.get(b"0001", b"a")
-    assert val == b"hello"
+    version = await storage.get(b"0001", b"a")
+    assert isinstance(version, ValueVersion)
+    assert version.value == b"hello"
 
 
 @pytest.mark.ut
@@ -79,62 +84,21 @@ async def test_put_get(storage):
 async def test_delete(storage):
     await storage.put(b"0001", b"a", b"x")
     await storage.delete(b"0001", b"a")
-    assert await storage.get(b"0001", b"a") is None
+    version = await storage.get(b"0001", b"a")
+    assert version.is_tombstone is True
 
 
 @pytest.mark.ut
 @pytest.mark.asyncio
-async def test_put_many(storage):
-    items = [
-        (b"0001", b"a", b"1"),
-        (b"0001", b"b", b"2"),
-        (b"0001", b"c", b"3"),
-    ]
-    await storage.put_many(items)
-
-    assert await storage.get(b"0001", b"a") == b"1"
-    assert await storage.get(b"0001", b"b") == b"2"
-    assert await storage.get(b"0001", b"c") == b"3"
-
-
-@pytest.mark.ut
-@pytest.mark.asyncio
-async def test_put_many_rejects_multiple_keyspaces(storage):
-    items = [
-        (b"0001", b"a", b"1"),
-        (b"0002", b"b", b"2"),
-    ]
-    with pytest.raises(ValueError):
-        await storage.put_many(items)
-
-
-@pytest.mark.ut
-@pytest.mark.asyncio
-async def test_iter_prefix(storage):
-    await storage.put(b"0001", b"user:1", b"1")
-    await storage.put(b"0001", b"user:2", b"2")
-    await storage.put(b"0001", b"order:1", b"10")
-
-    out = []
-    async for k, v in storage.iter(b"0001", prefix=b"user:"):
-        out.append((k, v))
-
-    assert out == [(b"user:1", b"1"), (b"user:2", b"2")]
-
-
-@pytest.mark.ut
-@pytest.mark.asyncio
-async def test_iter_start(storage):
+async def test_iter(storage):
     await storage.put(b"0001", b"a", b"1")
     await storage.put(b"0001", b"b", b"2")
     await storage.put(b"0001", b"c", b"3")
 
-    # Dummy backend: start is ignored, but test ensures API works
     out = []
-    async for k, v in storage.iter(b"0001", start=b"b"):
-        out.append((k, v))
+    async for k, v in storage.iter(b"0001", hlc=HLC.initial("A")):
+        out.append((k, v.value))
 
-    # backend yields in insertion order
     assert (b"a", b"1") in out
     assert (b"b", b"2") in out
     assert (b"c", b"3") in out
@@ -146,9 +110,9 @@ async def test_two_keyspaces_two_envs(storage):
     await storage.put(b"0001", b"a", b"1")
     await storage.put(b"0008", b"a", b"2")
 
-    backend1 = await storage.select_backend(b"0001")
-    backend2 = await storage.select_backend(b"0008")
+    backend1 = await storage._select_backend(b"0001")
+    backend2 = await storage._select_backend(b"0008")
 
     assert backend1 is not backend2
-    assert backend1.data[(b"0001", b"a")] == b"1"
-    assert backend2.data[(b"0008", b"a")] == b"2"
+    assert backend1.data[(b"0001", b"a")].value == b"1"
+    assert backend2.data[(b"0008", b"a")].value == b"2"

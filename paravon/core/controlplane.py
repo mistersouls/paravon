@@ -7,11 +7,11 @@ from paravon.core.cluster.probe import ProbeManager
 from paravon.core.connections.pool import ClientConnectionPool
 from paravon.core.facade import ParaCore
 from paravon.core.cluster.gossiper import Gossiper
-from paravon.core.helpers.hlc import LWWConflictResolver
+from paravon.core.helpers.lww import LWWConflictResolver
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import ServerConfig, PeerConfig
 from paravon.core.ports.serializer import Serializer
-from paravon.core.ports.storage import StorageFactory
+from paravon.core.ports.storage import BackendStorageFactory
 from paravon.core.service.lifecycle import LifecycleService
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.node import NodeService
@@ -28,7 +28,7 @@ class ControlPlane:
         api_app: Application,
         peer_app: Application,
         serializer: Serializer,
-        storage_factory: StorageFactory,
+        storage_factory: BackendStorageFactory,
     ) -> None:
         self._config = config
         self._api_app = api_app

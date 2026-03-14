@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from paravon.core.models.message import Message
+from paravon.core.models.version import HLC
 
 
 @dataclass
@@ -58,3 +59,11 @@ class RequestContext:
     responses: list[dict] = field(default_factory=list)
     failures: int = 0
     timeout: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PutData:
+    items: list[tuple[bytes, bytes, bytes]]
+    data_key: bytes
+    index_key: bytes
+    hlc: HLC

@@ -48,6 +48,7 @@ class ProbeManager:
         return self._cycle_count * 3
 
     async def run(self, stop_event: asyncio.Event) -> None:
+        # todo(souls): implement ping that attempt to write or read
         self._peer_clients.subscribe("ping/put", self)
         self._peer_clients.subscribe("ping/get", self)
         self._peer_clients.subscribe("ping/delete", self)
@@ -86,7 +87,7 @@ class ProbeManager:
 
         self._logger.debug(
             f"is_alive({peer}) -> phi={phi:.3f}, "
-            f"samples={len(fd._arrival_times)}, "
+            f"samples={fd.total_samples}, "
             f"required={self.required_samples}, alive={alive}"
         )
 
@@ -118,7 +119,7 @@ class ProbeManager:
             if fd.is_alive(min_samples=self.required_samples):
                 self._logger.info(
                     f"peer {peer} recovered "
-                    f"(samples={len(fd._arrival_times)}, phi={fd.compute_phi():.3f})"
+                    f"(samples={fd.total_samples}, phi={fd.compute_phi():.3f})"
                 )
                 break
 
