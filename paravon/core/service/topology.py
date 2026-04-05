@@ -184,7 +184,7 @@ class TopologyManager:
             self._ring = self._ring.drop_nodes({membership.node_id})
             self._logger.info(f"Membership {membership.node_id} removed from ring.")
 
-    async def restore(self, memberships: list[Membership]) -> None:
+    async def restore(self, memberships: list[Membership]) -> Ring:
         """
         Rebuild the entire topology from a list of memberships.
 
@@ -216,6 +216,7 @@ class TopologyManager:
             self._table = table
             self._ring = Ring(vnodes)
             self._logger.info(f"Ring updated with {len(vnodes)} vnodes")
+            return self._ring
 
     def _update_ring(self, diff: MembershipDiff) -> None:
         """

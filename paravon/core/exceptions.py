@@ -1,0 +1,4 @@
+
+
+class RebalanceError(Exception):
+    pass

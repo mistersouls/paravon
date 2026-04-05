@@ -114,6 +114,9 @@ class Storage(Protocol):
     ) -> AsyncIterator[tuple[bytes, ValueVersion]]:
         ...
 
+    async def get_last_hlc(self, keyspace: bytes) -> HLC:
+        ...
+
     async def close(self) -> None:
         ...
 

@@ -110,7 +110,7 @@ class HLC:
         The physical time is set to the current system time,
         and the logical counter starts at zero.
         """
-        return cls(physical=cls.now_millis(), logical=0, node_id=node_id)
+        return cls(physical=0, logical=0, node_id=node_id)
 
     def tick_local(self, now_ms: int | None = None) -> HLC:
         """

@@ -1,4 +1,5 @@
 import asyncio
+from importlib.metadata import always_iterable
 from typing import AsyncIterator
 
 from paravon.core.models.version import ValueVersion, HLC
@@ -47,6 +48,10 @@ class PartitionedStorage:
         backend = await self._select_backend(keyspace)
         async for key, version in backend.iter(keyspace, hlc, batch_size):
             yield key, version
+
+    async def get_last_hlc(self, keyspace: bytes) -> HLC:
+        backend = await self._select_backend(keyspace)
+        return await backend.get_last_hlc(keyspace)
 
     async def close(self) -> None:
         await self._storage_factory.close()

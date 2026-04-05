@@ -1,18 +1,25 @@
+import argparse
 import os
 import ssl
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 import yaml
 from typing import Generator
 
+from paravon.bootstrap.config.loader import get_configfile
+from paravon.bootstrap.config.settings import TLSSettings, ParavonConfig
+from paravon.bootstrap.deps import get_config
 from paravon.core.cluster.table import BucketTable
+from paravon.core.controlplane import ControlPlane
 from paravon.core.models.membership import Membership, NodePhase, NodeSize
+from paravon.core.routing.app import RoutedApplication
+from paravon.infra.lmdb_storage.aiobackend import LMDBStorageFactory
+from paravon.infra.msgpack_serializer import MsgPackSerializer
 from tests.fake.fake_transport import FakeTransport, JsonSerializer
 from tests.helpers import FakeParaConfig
-from tests.utils import generate_cert_pair, write_pem
-
-from paravon.bootstrap.config.settings import ParavonConfig, TLSSettings
+from tests.utils import generate_cert_pair, write_pem, env
 
 
 @pytest.fixture
@@ -101,7 +108,7 @@ def para_config(config_file, tls_settings) -> Generator[ParavonConfig, None, Non
 
     try:
         os.environ["TEST_PARANODECONFIG"] = str(config_file)
-        yield FakeParaConfig()
+        yield FakeParaConfig()  # noqa
     finally:
         os.environ.clear()
         os.environ.update(backup)
@@ -151,3 +158,90 @@ def table(meta_manager, serializer):
         meta_manager=meta_manager,
         delta=3
     )
+
+
+@pytest.fixture
+def control_plane(tmp_path: Path, tls_settings, monkeypatch):
+    get_configfile.cache_clear()
+    get_config.cache_clear()
+
+    monkeypatch.setattr(
+        "paravon.bootstrap.config.loader.get_cli_args",
+        lambda: argparse.Namespace(config=None)
+    )
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+
+    server_tls, _ = tls_settings
+    cafile = server_tls.cafile
+    keyfile = server_tls.keyfile
+    certfile = server_tls.certfile
+
+    # 2. Construire le YAML complet
+    config_yaml = {
+        "node": {
+            "id": "node-1",
+            "size": 1,
+        },
+        "server": {
+            "api": {"port": 2001},
+            "peer": {"port": 6001},
+            "replication": {"port": 13001},
+            "timeout_graceful_shutdown": 5,
+            "tls": {
+                "cafile": str(cafile),
+                "keyfile": str(keyfile),
+                "certfile": str(certfile),
+            },
+            "backlog": 128,
+            "limit_concurrency": 128,
+            "max_buffer_size": 2**20,
+            "max_message_size": 2**20,
+        },
+        "storage": {
+            "data_dir": str(data_dir),
+        },
+        "placement": {
+            "shift": 4,
+            "replication_factor": 2,
+        },
+    }
+
+    config_file = config_dir / "paranode.yaml"
+    config_file.write_text(yaml.safe_dump(config_yaml))
+
+    with env(PARANODECONFIG=str(config_file)):
+        config = get_config()
+        storage_factory = LMDBStorageFactory(
+            path=config.storage.data_dir,
+            map_size=1<<24
+        )
+
+        return ControlPlane(
+            config=config,
+            api_app=RoutedApplication(),
+            peer_app=RoutedApplication(),
+            serializer=MsgPackSerializer(),
+            storage_factory=storage_factory
+        )
+
+@pytest.fixture
+def core(control_plane):
+    loop = control_plane.loop
+    core = control_plane.build_core()
+    try:
+        yield core
+    finally:
+        loop.run_until_complete(core.storage._storage.close())
+
+
+@pytest.fixture
+def storage_service(core):
+    return core.storage

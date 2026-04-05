@@ -1,4 +1,6 @@
 import ipaddress
+import os
+from contextlib import contextmanager
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
@@ -131,3 +133,16 @@ def make_member(node_id, tokens=None, epoch=1, incarnation=1):
         size=NodeSize.L,
         peer_address="1.2.3.4:6000"
     )
+
+
+@contextmanager
+def env(**kwargs):
+    backup = os.environ.copy()
+
+    try:
+        os.environ.update(kwargs)
+        yield
+
+    finally:
+        os.environ.clear()
+        os.environ.update(backup)

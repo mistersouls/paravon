@@ -1,7 +1,8 @@
 import asyncio
 import logging
+import struct
 import uuid
-from typing import AsyncIterator
+from typing import AsyncIterator, Any
 
 from paravon.core.cluster.probe import ProbeManager
 from paravon.core.connections.pool import ClientConnectionPool
@@ -23,6 +24,8 @@ from paravon.core.storage.versioned import VersionedStorageFactory
 
 
 class StorageService:
+    MAX_CHUNK = 1024 * 600 # todo(souls): move in config
+
     def __init__(
         self,
         peer_config: PeerConfig,
@@ -34,6 +37,7 @@ class StorageService:
         probe_manager: ProbeManager,
         peer_clients: ClientConnectionPool,
         spawner: TaskSpawner,
+        partitioner: Partitioner,
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         self._serializer = serializer
@@ -49,10 +53,7 @@ class StorageService:
             storage_factory=self._versioned_factory,
             serializer=self._serializer,
         )
-        self._partitioner = Partitioner(
-            partition_shift=peer_config.partition_shift
-        )
-        self._peer_config = peer_config
+        self._partitioner = partitioner
         self._coordinator = Coordinator(
             meta_manager=meta_manager,
             probe_manager=probe_manager,
@@ -73,8 +74,8 @@ class StorageService:
         request = GetRequest(
             request_id=data.get("request_id", str(uuid.uuid4())),
             key=key,
-            quorum=data.get("quorum", 2),
-            timeout=data.get("timeout", 600),
+            quorum=data.get("quorum", 1),
+            timeout=data.get("timeout", 0.05),
         )
         return await self._coordinator.get(request, placement)
 
@@ -87,7 +88,7 @@ class StorageService:
             request_id=data.get("request_id", str(uuid.uuid4())),
             key=key,
             value=value,
-            quorum=data.get("quorum", 2),
+            quorum=data.get("quorum", 1),
             timeout=data.get("timeout", 0.05),
         )
         return await self._coordinator.put(request, placement)
@@ -99,7 +100,7 @@ class StorageService:
         request = DeleteRequest(
             request_id=data.get("request_id", str(uuid.uuid4())),
             key=key,
-            quorum=data.get("quorum", 2),
+            quorum=data.get("quorum", 1),
             timeout=data.get("timeout", 0.05),
         )
         return await self._coordinator.delete(request, placement)
@@ -135,14 +136,44 @@ class StorageService:
             }
         )
 
-    async def iter_since_hlc(
+    async def last_hlc_for(self, data: dict) -> HLC:
+        return await self._storage.get_last_hlc(data["keyspace"])
+
+    async def fetch_data(
         self,
         data: dict
-    ) -> AsyncIterator[tuple[bytes, ValueVersion]]:
+    ) -> Message:
+        buf = bytearray()
         keyspace = data["keyspace"]
         hlc = HLC.from_dict(data["hlc"])
-        async for key, version in self._storage.iter(keyspace, hlc):
-            yield key, version
+        batch_size = data.get("batch_size", 1024)
+        last_hlc = hlc
+        count = 0
+
+        async for key, version in self._storage.iter(keyspace, hlc, batch_size=batch_size):
+            # [4 bytes klen][klen bytes key][4 bytes vlen][vlen bytes value]...
+            raw_version = self._serializer.serialize(version.to_dict())
+            kv = struct.pack(">I", len(key)) + key
+            kv += struct.pack(">I", len(raw_version)) + raw_version
+            if len(buf) + len(kv) <= self.MAX_CHUNK:
+                buf += kv
+                last_hlc = version.hlc
+                count += 1
+            else:
+                break
+
+        data: dict[str, Any] = {
+            "keyspace": keyspace,
+            "hlc": last_hlc.to_dict(),
+            "count": count,
+            "request_id": data.get("request_id", str(uuid.uuid4())),
+        }
+
+        if buf:
+            data["chunk"] = bytes(buf)
+
+        return Message(type="partition/fetch", data=data)
+
 
     async def _find_key_placement(self, key: bytes) -> PartitionPlacement:
         ring = await self._topology.get_ring()

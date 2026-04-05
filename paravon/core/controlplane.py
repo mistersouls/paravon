@@ -4,6 +4,7 @@ import ssl
 
 from paravon.bootstrap.config.settings import ParavonConfig
 from paravon.core.cluster.probe import ProbeManager
+from paravon.core.cluster.rebalance import Rebalancer
 from paravon.core.connections.pool import ClientConnectionPool
 from paravon.core.facade import ParaCore
 from paravon.core.cluster.gossiper import Gossiper
@@ -17,6 +18,7 @@ from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.node import NodeService
 from paravon.core.service.storage import StorageService
 from paravon.core.service.topology import TopologyManager
+from paravon.core.space.partition import Partitioner
 from paravon.core.transport.application import Application
 from paravon.core.transport.server import MessageServer
 
@@ -76,6 +78,31 @@ class ControlPlane:
             meta_manager=self._meta_manager,
             spawner=self._spawner
         )
+        self._partitioner = Partitioner(
+            partition_shift=self._peer_config.partition_shift
+        )
+        self._storage_service = StorageService(
+            peer_config=self._peer_config,
+            backend_factory=self._storage_factory,
+            serializer=self._serializer,
+            conflict_resolver=LWWConflictResolver(),
+            topology=self._topology_manager,
+            spawner=self._spawner,
+            probe_manager=self._probe_manager,
+            peer_clients=self._peer_clients,
+            meta_manager=self._meta_manager,
+            partitioner=self._partitioner,
+            loop=self._loop,
+        )
+        self._rebalancer = Rebalancer(
+            partitioner=self._partitioner,
+            node_id=self._peer_config.node_id,
+            peer_clients=self._peer_clients,
+            spawner=self._spawner,
+            replication_factor=self._peer_config.replication_factor,
+            storage_service=self._storage_service,
+            serializer=self._serializer
+        )
         self._gossiper = Gossiper(
             spawner=self._spawner,
             serializer=self._serializer,
@@ -91,18 +118,7 @@ class ControlPlane:
             topology_manager=self._topology_manager,
             gossiper=self._gossiper,
             spawner=self._spawner,
-            loop=self._loop,
-        )
-        self._storage_service = StorageService(
-            peer_config=self._peer_config,
-            backend_factory=self._storage_factory,
-            serializer=self._serializer,
-            conflict_resolver=LWWConflictResolver(),
-            topology=self._topology_manager,
-            spawner=self._spawner,
-            probe_manager=self._probe_manager,
-            peer_clients=self._peer_clients,
-            meta_manager=self._meta_manager,
+            rebalancer=self._rebalancer,
             loop=self._loop,
         )
         self._lifecycle_service = LifecycleService(

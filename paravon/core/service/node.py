@@ -2,6 +2,8 @@ import asyncio
 import logging
 
 from paravon.core.cluster.gossiper import Gossiper
+from paravon.core.cluster.rebalance import Rebalancer
+from paravon.core.exceptions import RebalanceError
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.message import Message
@@ -11,6 +13,8 @@ from paravon.core.service.bootstrapper import SeedBootstrapper
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.topology import TopologyManager
 from paravon.core.space.hashspace import HashSpace
+from paravon.core.space.ring import Ring
+from paravon.core.space.vnode import VNode
 from paravon.core.transport.server import MessageServer
 
 
@@ -24,12 +28,14 @@ class NodeService:
         gossiper: Gossiper,
         serializer: Serializer,
         topology_manager: TopologyManager,
+        rebalancer: Rebalancer,
         loop: asyncio.AbstractEventLoop,
     ) -> None:
         self._api_server = api_server
         self._meta_manager = meta_manager
         self._spawner = spawner
         self._topology = topology_manager
+        self._rebalancer = rebalancer
         self._peer_config = peer_config
         self._gossiper = gossiper
         self._serializer = serializer
@@ -87,6 +93,11 @@ class NodeService:
                         type="ok",
                         data={"message": message}
                     )
+                case NodePhase.failed:
+                    self._spawner.spawn(self._complete_join(membership))
+                    message = "Schedule joining node."
+                    self._logger.info(message)
+                    return Message(type="ko", data={"message": message})
                 case _:
                     message = f"Cannot join from {membership.phase}"
                     return Message(
@@ -183,7 +194,7 @@ class NodeService:
 
         await self._topology.add_membership(membership)
 
-    async def _discover(self, membership: Membership) -> None:
+    async def _discover(self, membership: Membership) -> Ring:
         async with SeedBootstrapper(
             membership=membership,
             peer_config=self._peer_config,
@@ -192,7 +203,7 @@ class NodeService:
             gossiper=self._gossiper,
             loop=self._loop
         ) as memberships:
-            await self._topology.restore(memberships)
+            return await self._topology.restore(memberships)
 
     async def _complete_drain(self, membership: Membership) -> None:
         async with self._lock:
@@ -206,11 +217,25 @@ class NodeService:
 
     async def _complete_join(self, membership: Membership) -> None:
         try:
-            await self._discover(membership)
-            # to review: fetch partitions or missing keys
+            curr_ring = await self._discover(membership)
+            tokens = membership.tokens
+
+            if not tokens:
+                size = membership.size.value
+                tokens = list(HashSpace.generate_tokens(membership.node_id, size))
+                await self._meta_manager.set_tokens(tokens)
+
+            vnodes = VNode.vnodes_for(membership.node_id, tokens)
+            targ_ring = curr_ring.add_vnodes(vnodes)
+            plan = await self._rebalancer.plan(curr_ring, targ_ring)
+            await self._rebalancer.apply(plan)
+            _, failed_partitions = await self._rebalancer.wait()
+            if failed_partitions:
+                raise RebalanceError(f"Could not fetch own partitions: {failed_partitions}")
         except Exception as ex:
             await self._meta_manager.set_phase(NodePhase.failed)
             self._logger.error(f"Error during joining: {ex}")
+            return
 
         async with self._lock:
             if membership.phase == NodePhase.joining:
