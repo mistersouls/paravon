@@ -15,7 +15,8 @@ from paravon.infra.msgpack_serializer import MsgPackSerializer
 def get_cp() -> ControlPlane:
     config = get_config()
     storage_factory = LMDBStorageFactory(
-        path=config.storage.data_dir
+        path=config.storage.data_dir,
+        map_size=1 << 25
     )
 
     return ControlPlane(

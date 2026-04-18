@@ -82,3 +82,9 @@ async def forward_put(data: dict) -> Message:
     if msg.type == "ok":
         return Message(type="forward/write", data=msg.data)
     return msg
+
+
+@app.request("partition/fetch")
+async def fetch_partition(data: dict) -> Message:
+    core = get_core()
+    return await core.storage.fetch_data(data)

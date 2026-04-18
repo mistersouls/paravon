@@ -110,8 +110,22 @@ class Partitioner:
         vnode = ring.find_successor(partition.end)
         return PartitionPlacement(partition, vnode)
 
+    @staticmethod
+    def preference_list(token: int, rf: int, ring: Ring) -> list[str]:
+        owner = ring.find_successor(token)
+        replicas = []
 
-@dataclass(frozen=True, slots=True)
+        for replica in ring.iter_from(owner):
+            if replica.node_id not in replicas:
+                replicas.append(replica.node_id)
+
+            if len(replicas) == rf:
+                break
+
+        return replicas
+
+
+@dataclass(frozen=True, slots=True, eq=True)
 class LogicalPartition:
     """
     LogicalPartition represents a fixed segment of the 128-bit hash space.
@@ -138,6 +152,11 @@ class LogicalPartition:
         in storage engines or replication metadata.
         """
         return format(self.pid, "x").encode("ascii")
+
+    @staticmethod
+    def pid_for(pid_bytes: bytes) -> int:
+        pid = int(pid_bytes.decode("ascii"), 16)
+        return pid
 
     def contains(self, h: int) -> bool:
         """Reports whether the hash h belongs to this partition."""
@@ -168,3 +187,21 @@ class PartitionPlacement:
         partition.
         """
         return self.partition.pid_bytes
+
+
+class PlacementStrategy:
+    def __init__(self, replication_factor: int) -> None:
+        self._replication_factor = replication_factor
+
+    def preference_list(self, token: int, ring: Ring) -> list[str]:
+        replicas = []
+        owner = ring.find_successor(token)
+
+        for replica in ring.iter_from(owner):
+            if replica.node_id not in replicas:
+                replicas.append(replica.node_id)
+
+            if len(replicas) == self._replication_factor:
+                break
+
+        return replicas

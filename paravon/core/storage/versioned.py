@@ -94,14 +94,40 @@ class VersionedStorage:
                 continue
 
             c_hlc_bytes, user_key = parsed
+            c_hlc = HLC.decode(c_hlc_bytes)
+            if c_hlc <= hlc:
+                if c_hlc < hlc:
+                    self._logger.error(
+                        f"HLC ordering violation: index returned "
+                        f"c_hlc={c_hlc} < watermark={hlc}"
+                    )
+                continue
+
             data_key = KeyCodec.data_key(keyspace, user_key, c_hlc_bytes)
             value = await self._backend.get(self.DATASPACE, data_key)
             version = ValueVersion(
                 value=value,
-                hlc=HLC.decode(c_hlc_bytes),
+                hlc=c_hlc,
                 is_tombstone=value == KeyCodec.TOMBSTONE,
             )
             yield user_key, version
+
+    async def get_last_hlc(self, keyspace: bytes) -> HLC:
+        async for index_key, _ in self._backend.iter(
+            keyspace=self.INDEXSPACE,
+            prefix=keyspace,
+            reverse=True,
+            limit=1,
+            batch_size=1
+        ):
+            parsed = KeyCodec.parse_index_key(keyspace, index_key)
+            if parsed is None:
+                continue
+
+            hlc_bytes, _ = parsed
+            return HLC.decode(hlc_bytes)
+
+        return HLC.initial(node_id=self._hlc.node_id)
 
     async def close(self) -> None:
         await self._backend.close()
@@ -140,11 +166,11 @@ class VersionedStorage:
     ) -> tuple[bytes, bytes] | None:
         prefix = KeyCodec.data_prefix(keyspace, key)
         async for data_key, value in self._backend.iter(
-                keyspace=self.DATASPACE,
-                prefix=prefix,
-                reverse=True,
-                limit=1,
-                batch_size=1
+            keyspace=self.DATASPACE,
+            prefix=prefix,
+            reverse=True,
+            limit=1,
+            batch_size=1
         ):
             return data_key, value
 

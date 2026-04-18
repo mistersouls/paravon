@@ -102,6 +102,9 @@ class Ring:
     def __iter__(self) -> Iterator[VNode]:
         return iter(self._vnodes)
 
+    def __repr__(self) -> str:
+        return f"Ring(f{self._vnodes})"
+
     @staticmethod
     def _merge_sorted(a: list[VNode], b: list[VNode]) -> list[VNode]:
         """
