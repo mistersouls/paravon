@@ -29,6 +29,7 @@ async def insert_versions(storage_service, keyspace: bytes, count: int):
         await asyncio.sleep(0.0001)
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_fetch_data_single_entry(storage_service, keyspace):
     await insert_versions(storage_service, keyspace, 1)
@@ -52,6 +53,7 @@ async def test_fetch_data_single_entry(storage_service, keyspace):
     assert key == b"key-0"
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_fetch_data_multiple_entries_single_chunk(storage_service, keyspace):
     storage_service.MAX_CHUNK = 10_000  # large enough
@@ -70,6 +72,7 @@ async def test_fetch_data_multiple_entries_single_chunk(storage_service, keyspac
     assert "chunk" in data
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_fetch_data_chunking(storage_service, keyspace):
     storage_service.MAX_CHUNK = 200
@@ -88,6 +91,7 @@ async def test_fetch_data_chunking(storage_service, keyspace):
     assert "chunk" in data
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_fetch_data_paginated(storage_service, keyspace):
     storage_service.MAX_CHUNK = 1000
@@ -114,6 +118,7 @@ async def test_fetch_data_paginated(storage_service, keyspace):
     assert collected == 30
 
 
+@pytest.mark.it
 @pytest.mark.asyncio
 async def test_fetch_data_empty(storage_service, keyspace):
     req = {

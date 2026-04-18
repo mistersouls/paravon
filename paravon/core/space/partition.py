@@ -125,7 +125,7 @@ class Partitioner:
         return replicas
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=True)
 class LogicalPartition:
     """
     LogicalPartition represents a fixed segment of the 128-bit hash space.

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import struct
 import uuid
-from typing import AsyncIterator, Any
+from typing import Any
 
 from paravon.core.cluster.probe import ProbeManager
 from paravon.core.connections.pool import ClientConnectionPool
@@ -74,7 +74,7 @@ class StorageService:
         request = GetRequest(
             request_id=data.get("request_id", str(uuid.uuid4())),
             key=key,
-            quorum=data.get("quorum", 1),
+            quorum=data.get("quorum", 2),
             timeout=data.get("timeout", 0.05),
         )
         return await self._coordinator.get(request, placement)
@@ -88,7 +88,7 @@ class StorageService:
             request_id=data.get("request_id", str(uuid.uuid4())),
             key=key,
             value=value,
-            quorum=data.get("quorum", 1),
+            quorum=data.get("quorum", 2),
             timeout=data.get("timeout", 0.05),
         )
         return await self._coordinator.put(request, placement)
@@ -100,7 +100,7 @@ class StorageService:
         request = DeleteRequest(
             request_id=data.get("request_id", str(uuid.uuid4())),
             key=key,
-            quorum=data.get("quorum", 1),
+            quorum=data.get("quorum", 2),
             timeout=data.get("timeout", 0.05),
         )
         return await self._coordinator.delete(request, placement)
@@ -162,18 +162,19 @@ class StorageService:
             else:
                 break
 
+        membership = await self._meta_manager.get_membership()
         data: dict[str, Any] = {
             "keyspace": keyspace,
             "hlc": last_hlc.to_dict(),
             "count": count,
             "request_id": data.get("request_id", str(uuid.uuid4())),
+            "source": membership.node_id
         }
 
         if buf:
             data["chunk"] = bytes(buf)
 
         return Message(type="partition/fetch", data=data)
-
 
     async def _find_key_placement(self, key: bytes) -> PartitionPlacement:
         ring = await self._topology.get_ring()

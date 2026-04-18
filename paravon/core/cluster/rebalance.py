@@ -93,7 +93,8 @@ class Rebalancer:
         if message.type != "partition/fetch":
             return
 
-        keyspace = LogicalPartition.pid_for(message.data["keyspace"])
+        data = message.data
+        keyspace = LogicalPartition.pid_for(data["keyspace"])
         raw = message.data.get("chunk")
         raw_len = len(raw or b"")
         self._logger.info(
@@ -101,8 +102,16 @@ class Rebalancer:
         )
 
         info = self._partitions.get(keyspace)
-        if not info:
-            self._logger.warning(f"Unknown partition {keyspace}, ignoring.")
+        if not info or info.cancelled.is_set():
+            self._logger.warning(f"Ignoring message for inactive partition {keyspace}")
+            return
+
+        source = data["source"]
+        if source not in info.sources:
+            self._logger.warning(
+                f"Received from {source} but expect "
+                f"one of {info.sources}, ignoring"
+            )
             return
 
         await info.queue.put(message.data)
