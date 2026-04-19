@@ -6,6 +6,7 @@ import pytest
 from paravon.core.cluster.rebalance import Rebalancer
 from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.message import Message
+from paravon.core.models.version import HLC
 from paravon.core.ports.serializer import Serializer
 from paravon.core.space.partition import Partitioner, LogicalPartition
 from paravon.core.space.ring import Ring
@@ -33,6 +34,17 @@ def make_rebalancer(
         replication_factor=replication_factor,
         node_id="node-1"
     )
+
+async def simulate_receiving(rebalancer: Rebalancer, keys: list[tuple[str, bytes]]) -> None:
+    msg = (
+        Message(type="rebalance/fetch", data={"source": source, "keyspace": keyspace})
+        for source, keyspace in keys
+    )
+    await asyncio.gather(*(rebalancer.handle(m) for m in msg))
+
+
+async def simulate_done(rebalancer: Rebalancer, done: list[tuple[str, int, HLC]]) -> None:
+    await asyncio.gather(*(rebalancer.mark_incoming_done(s, k, v) for s, k, v in done))
 
 
 @pytest.mark.ut
@@ -67,44 +79,64 @@ async def test_rebalance_join():
     p0 = LogicalPartition(pid=0, start=0, end=end_0)
     p1 = LogicalPartition(pid=1, start=end_0, end=end_1)
     p2 = LogicalPartition(pid=2, start=end_1, end=end_2)
-    expected = {
-        ("node-B", "node-C", "node-D"): [p0],
-        ("node-C", "node-D", "node-A"): [p1],
-        ("node-D", "node-A", "node-B"): [p2]
-    }
 
-    assert plan == expected
+    assert plan.incoming == {}
+    assert sorted(plan.outgoing.keys()) == [("node-A", 1), ("node-B", 2), ("node-D", 0)]
+
     await rebalancer.apply(plan)
+    await simulate_receiving(
+        rebalancer,
+        [("node-A", p1.pid_bytes), ("node-B", p2.pid_bytes), ("node-D", p0.pid_bytes)]
+    )
+    actual = await rebalancer.wait_outgoing()
+    assert set(actual[0]) == {("node-D", 0), ("node-A", 1), ("node-B", 2)}
+    assert actual[1] == []
 
-    await rebalancer.handle(
-        Message(
-            type="partition/fetch",
-            data={
-                "source": "node-C",
-                "keyspace": p0.pid_bytes
-            }
-        )
+
+@pytest.mark.ut
+@pytest.mark.asyncio
+async def test_rebalance_join_incomplete_rf():
+    partitioner = Partitioner(partition_shift=2)
+
+    end_0 = 1 << 126    # pid_0.end
+    end_1 = 2 << 126    # pid_1.end
+    end_2 = 3 << 126    # pid_2.end
+    # end_3 = 4 << 126    # pid_3.end
+
+    # pid_0: B, A
+    # pid_1: A, B
+    # pid_2: A, B
+    # pid_3: A, B
+    old_ring = Ring([
+        VNode("node-A", end_0),
+        VNode("node-B", end_1),
+
+    ])
+
+    # pid_0: B, 1, A
+    # pid_1: 1, A, B
+    # pid_2: 1, A, B
+    # pid_3: A, B, 1
+    new_ring = Ring([
+        VNode("node-A", end_0),
+        VNode("node-B", end_1),
+        VNode("node-1", end_2 + 1),
+    ])
+
+    rebalancer = make_rebalancer(partitioner=partitioner)
+
+    plan = await rebalancer.plan(old_ring, new_ring)
+
+    assert plan.incoming == {}
+    assert len(plan.outgoing.keys()) == 4
+
+    await rebalancer.apply(plan)
+    await simulate_receiving(
+        rebalancer,
+        [(source, str(pid).encode()) for source, pid in plan.outgoing.keys()]
     )
-    await rebalancer.handle(
-        Message(
-            type="partition/fetch",
-            data={
-                "source": "node-A",
-                "keyspace": p1.pid_bytes
-            }
-        )
-    )
-    await rebalancer.handle(
-        Message(
-            type="partition/fetch",
-            data={
-                "source": "node-D",
-                "keyspace": p2.pid_bytes
-            }
-        )
-    )
-    actual = await rebalancer.wait()
-    assert set(actual[0]) == {0, 1, 2}
+    actual = await rebalancer.wait_outgoing()
+    assert len(actual[0]) == 4
     assert actual[1] == []
 
 
@@ -114,13 +146,12 @@ async def test_rebalance_join_group():
     partitioner = Partitioner(partition_shift=3)
 
     end_0 = 1 << 125
-    end_1 = 2 << 125
+    # end_1 = 2 << 125
     end_2 = 3 << 125
     end_3 = 4 << 125
     end_4 = 5 << 125
     end_5 = 6 << 125
     end_6 = 7 << 125
-    end_7 = 8 << 125
 
     # pid_0: A, C, B
     # pid_1: B, C, A
@@ -145,7 +176,7 @@ async def test_rebalance_join_group():
     ])
 
     # pid_0: A, C, 1
-    # pid_1: 1, B, C
+    # pid_1: 1, 2, B
     # pid_2: 1, B, C
     # pid_3: B, C, A
     # pid_4: A, D, C
@@ -157,7 +188,8 @@ async def test_rebalance_join_group():
         VNode("node-A", end_0 + 1),
         VNode("node-C", end_0 + 2),
 
-        VNode("node-1", end_2 - 1),
+        VNode("node-1", end_2 - 2),
+        VNode("node-2", end_2 - 1),
         VNode("node-1", end_3 - 1),
 
         VNode("node-B", end_3 + 1),
@@ -172,57 +204,21 @@ async def test_rebalance_join_group():
     rebalancer = make_rebalancer(partitioner=partitioner)
     plan = await rebalancer.plan(old_ring, new_ring)
 
-    p0 = LogicalPartition(pid=0, start=0, end=end_0)
-    p1 = LogicalPartition(pid=1, start=end_0, end=end_1)
-    p2 = LogicalPartition(pid=2, start=end_1, end=end_2)
-    p7 = LogicalPartition(pid=7, start=end_6, end=end_7)
     expected = {
-        ("node-A", "node-C", "node-B"): [p0, p7],
-        ("node-B", "node-C", "node-A"): [p1, p2]
+        ("node-B", 0),
+        ("node-C", 1),
+        ("node-A", 2),
+        ("node-B", 7)
     }
 
+    assert set(plan.outgoing.keys()) == expected
+    assert plan.incoming == {}
+
     await rebalancer.apply(plan)
+    await simulate_receiving(rebalancer, [(s, str(p).encode()) for s, p in expected])
 
-    await rebalancer.handle(
-        Message(
-            type="partition/fetch",
-            data={
-                "source": "node-C",
-                "keyspace": p0.pid_bytes
-            }
-        )
-    )
-    await rebalancer.handle(
-        Message(
-            type="partition/fetch",
-            data={
-                "source": "node-B",
-                "keyspace": p7.pid_bytes
-            }
-        )
-    )
-    await rebalancer.handle(
-        Message(
-            type="partition/fetch",
-            data={
-                "source": "node-A",
-                "keyspace": p1.pid_bytes
-            }
-        )
-    )
-    await rebalancer.handle(
-        Message(
-            type="partition/fetch",
-            data={
-                "source": "node-C",
-                "keyspace": p2.pid_bytes
-            }
-        )
-    )
-
-    assert plan == expected
-    actual = await rebalancer.wait()
-    assert set(actual[0]) == {0, 7, 1, 2}
+    actual = await rebalancer.wait_outgoing()
+    assert set(actual[0]) == expected
     assert actual[1] == []
 
 
@@ -237,27 +233,162 @@ async def test_plan_drain():
     end_3 = 4 << 126
 
     old_ring = Ring([
-        VNode("node-A", end_0), # pid_0: B, C, X
-        VNode("node-B", end_1), # pid_1: C, X, 1
-        VNode("node-C", end_2), # pid_2: X, 1, A
-        VNode("node-X", end_2 + 1),
+        VNode("node-A", end_0), # pid_0: B, C, 1
+        VNode("node-B", end_1), # pid_1: C, 1, A
+        VNode("node-C", end_2), # pid_2: 1, A, B
+        VNode("node-1", end_2 + 1),
         VNode("node-1", end_3), # pid_3: A, B, C
     ])
 
     new_ring = Ring([
-        VNode("node-A", end_0), # pid_0: B, C, 1
-        VNode("node-B", end_1), # pid_1: C, 1, A
-        VNode("node-C", end_2), # pid_2: 1, A, B
-        VNode("node-1", end_3)  # pid_3: A, B, C
+        VNode("node-A", end_0), # pid_0: B, C, A
+        VNode("node-B", end_1), # pid_1: C, A, B
+        VNode("node-C", end_2), # pid_2: A, B, C pid_3: A, B, C
     ])
 
-    p0 = LogicalPartition(pid=0, start=0, end=end_0)
+    rebalancer = make_rebalancer(partitioner=partitioner)
+
+    plan = await rebalancer.plan(old_ring, new_ring)
     expected = {
-        ("node-B", "node-C", "node-X"): [p0]
+        ("node-A", 0),
+        ("node-B", 1),
+        ("node-C", 2),
     }
+
+    assert set(plan.incoming.keys()) == expected
+    assert plan.outgoing == {}
+
+    await rebalancer.apply(plan)
+    await simulate_done(
+        rebalancer,
+        [(s, p, HLC.initial("")) for s, p in expected],
+    )
+    actual = await rebalancer.wait_incoming()
+    assert set(actual[0]) == expected
+    assert actual[1] == []
+
+
+@pytest.mark.ut
+@pytest.mark.asyncio
+async def test_rebalance_drain_group():
+    partitioner = Partitioner(partition_shift=3)
+
+    end_0 = 1 << 125
+    end_2 = 3 << 125
+    end_3 = 4 << 125
+    end_4 = 5 << 125
+    end_5 = 6 << 125
+    end_6 = 7 << 125
+
+    # pid_0: A, C, 1
+    # pid_1: 1, B, C
+    # pid_2: B, C, A
+    # pid_3: B, C, A
+    # pid_4: A, D, C
+    # pid_5: D, A, C
+    # pid_6: D, A, C
+    # pid_7: A, C, 1
+    old_ring = Ring([
+        VNode("node-A", end_0 - 1),
+        VNode("node-A", end_0 + 1),
+        VNode("node-C", end_0 + 2),
+
+        VNode("node-1", end_2 - 2),
+        VNode("node-1", end_2 - 1),
+
+        VNode("node-B", end_3 + 1),
+
+        VNode("node-C", end_4),
+        VNode("node-A", end_5),
+
+        VNode("node-D", end_6 + 1),
+        VNode("node-A", end_6 + 2),
+    ])
+
+    # pid_0: A, B, D
+    # pid_1: B, A, D
+    # pid_2: B, A, D
+    # pid_3: B, A, D
+    # pid_4: A, D, B
+    # pid_5: D, A, B
+    # pid_6: D, A, B
+    # pid_7: A, B, D
+    new_ring = Ring([
+        VNode("node-A", end_0 - 1),
+        VNode("node-A", end_0 + 1),
+
+        VNode("node-B", end_3 + 1),
+
+        VNode("node-A", end_5),
+
+        VNode("node-D", end_6 + 1),
+        VNode("node-A", end_6 + 2),
+    ])
 
     rebalancer = make_rebalancer(partitioner=partitioner)
 
     plan = await rebalancer.plan(old_ring, new_ring)
 
-    assert plan == expected
+    expected = {
+        ("node-D", 0),
+        ("node-A", 1),
+        ("node-D", 7),
+    }
+
+    assert set(plan.incoming.keys()) == expected
+    assert plan.outgoing == {}
+
+    await rebalancer.apply(plan)
+    await simulate_done(
+        rebalancer,
+        [(s, p, HLC.initial("")) for s, p in expected],
+    )
+
+    actual = await rebalancer.wait_incoming()
+    assert set(actual[0]) == expected
+    assert actual[1] == []
+
+
+@pytest.mark.ut
+@pytest.mark.asyncio
+async def test_rebalance_drain_incomplete_rf():
+    partitioner = Partitioner(partition_shift=2)
+
+    end_0 = 1 << 126
+    end_1 = 2 << 126
+    end_2 = 3 << 126
+    # end_3 = 4 << 126
+
+    # pid_0: 1, B, A
+    # pid_1: B, A, 1
+    # pid_2: A, 1, B
+    # pid_3: A, 1, B
+    old_ring = Ring([
+        VNode("node-A", end_0),
+        VNode("node-1", end_1),
+        VNode("node-B", end_2)
+    ])
+
+    # pid_0: B, A
+    # pid_1: B, A
+    # pid_2: A, B
+    # pid_3: A, B
+    new_ring = Ring([
+        VNode("node-A", end_0),
+        VNode("node-B", end_2)
+    ])
+
+    rebalancer = make_rebalancer(partitioner=partitioner)
+
+    plan = await rebalancer.plan(old_ring, new_ring)
+
+    expected = {
+        ("node-A", 0),
+        ("node-A", 1),
+        ("node-A", 2),
+        ("node-A", 3),
+    }
+
+    assert len(plan.incoming) == 4
+    assert plan.outgoing == {}
+

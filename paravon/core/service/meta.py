@@ -132,6 +132,13 @@ class NodeMetaManager:
         else:
             await self._init_membership()
 
+    async def set_sync_confirmations(self, confirmations: dict[str, list[int]]) -> None:
+        """
+        Persists the provided sync confirmations for replicas under the 'sync_confirmations' key.
+        The confirmations is a dict mapping node_id to list of partition ids that have been sync confirmed.
+        """
+        await self._put("sync_confirmations", confirmations)
+
     async def _init_membership(self) -> Membership:
         epoch = await self._get("epoch", 0)
         incarnation = await self._get("incarnation", 0)

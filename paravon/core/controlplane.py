@@ -138,7 +138,8 @@ class ControlPlane:
     def build_core(self) -> ParaCore:
         return ParaCore(
             node_service=self._node_service,
-            storage_service=self._storage_service
+            storage_service=self._storage_service,
+            rebalancer=self._rebalancer
         )
 
     @property

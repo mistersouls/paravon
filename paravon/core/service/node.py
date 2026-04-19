@@ -8,11 +8,13 @@ from paravon.core.helpers.spawn import TaskSpawner
 from paravon.core.models.config import PeerConfig
 from paravon.core.models.message import Message
 from paravon.core.models.membership import Membership, NodePhase
+from paravon.core.models.version import HLC
 from paravon.core.ports.serializer import Serializer
 from paravon.core.service.bootstrapper import SeedBootstrapper
 from paravon.core.service.meta import NodeMetaManager
 from paravon.core.service.topology import TopologyManager
 from paravon.core.space.hashspace import HashSpace
+from paravon.core.space.partition import LogicalPartition
 from paravon.core.space.ring import Ring
 from paravon.core.space.vnode import VNode
 from paravon.core.transport.server import MessageServer
@@ -171,6 +173,17 @@ class NodeService:
             }
         )
 
+    async def mark_partition_done(self, data: dict) -> Message:
+        source = data["source"]
+        pid = LogicalPartition.pid_for(data["keyspace"])
+        hlc = HLC.from_dict(data["hlc"])
+        await self._rebalancer.mark_incoming_done(source, pid, hlc)
+        membership = await self._meta_manager.get_membership()
+        return Message(
+            type="ok",
+            data={"source": membership.node_id}
+        )
+
     async def wait_for_idle(self) -> None:
         await self._idle_event.wait()
 
@@ -207,29 +220,37 @@ class NodeService:
 
     async def _complete_drain(self, membership: Membership) -> None:
         async with self._lock:
-            if membership.phase == NodePhase.draining:
+            if membership.phase != NodePhase.draining:
+                return
+
+            try:
+                # await self._rebalancer.abort_fetch()
+
+                target_ring = await self._discover(membership)
+                current_ring = await self._ring_with(target_ring, membership)
+                plan = await self._rebalancer.plan(current_ring, target_ring)
+                await self._rebalancer.apply(plan)
+                _, failed = await self._rebalancer.wait_incoming()
+                if failed:
+                    raise RebalanceError("Peers do not confirm fetching all partitions.")
+
                 await self._meta_manager.set_tokens([])
                 await self._meta_manager.bump_epoch()
                 await self._topology.drain_membership(membership)
                 await self._meta_manager.set_phase(NodePhase.idle)
                 self._idle_event.set()
                 self._logger.info("Complete drain.")
+            except Exception as ex:
+                await self._meta_manager.set_phase(NodePhase.failed)
+                self._logger.error(f"Error during draining: {ex}")
 
     async def _complete_join(self, membership: Membership) -> None:
         try:
             curr_ring = await self._discover(membership)
-            tokens = membership.tokens
-
-            if not tokens:
-                size = membership.size.value
-                tokens = list(HashSpace.generate_tokens(membership.node_id, size))
-                await self._meta_manager.set_tokens(tokens)
-
-            vnodes = VNode.vnodes_for(membership.node_id, tokens)
-            targ_ring = curr_ring.add_vnodes(vnodes)
+            targ_ring = await self._ring_with(curr_ring, membership)
             plan = await self._rebalancer.plan(curr_ring, targ_ring)
             await self._rebalancer.apply(plan)
-            _, failed_partitions = await self._rebalancer.wait()
+            _, failed_partitions = await self._rebalancer.wait_outgoing()
             if failed_partitions:
                 raise RebalanceError(f"Could not fetch own partitions: {failed_partitions}")
         except Exception as ex:
@@ -241,3 +262,14 @@ class NodeService:
             if membership.phase == NodePhase.joining:
                 await self.bootstrap_node(membership)
                 self._ready_event.set()
+
+    async def _ring_with(self, ring: Ring, membership: Membership) -> Ring:
+        tokens = membership.tokens
+
+        if not tokens:
+            size = membership.size.value
+            tokens = list(HashSpace.generate_tokens(membership.node_id, size))
+            await self._meta_manager.set_tokens(tokens)
+
+        vnodes = VNode.vnodes_for(membership.node_id, tokens)
+        return ring.add_vnodes(vnodes)

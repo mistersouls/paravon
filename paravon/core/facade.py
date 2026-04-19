@@ -1,3 +1,4 @@
+from paravon.core.cluster.rebalance import Rebalancer
 from paravon.core.service.node import NodeService
 from paravon.core.service.storage import StorageService
 
@@ -7,6 +8,8 @@ class ParaCore:
         self,
         node_service: NodeService,
         storage_service: StorageService,
+        rebalancer: Rebalancer
     ) -> None:
         self.node = node_service
         self.storage = storage_service
+        self.rebalancer = rebalancer

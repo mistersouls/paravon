@@ -174,7 +174,7 @@ class StorageService:
         if buf:
             data["chunk"] = bytes(buf)
 
-        return Message(type="partition/fetch", data=data)
+        return Message(type="rebalance/fetch", data=data)
 
     async def _find_key_placement(self, key: bytes) -> PartitionPlacement:
         ring = await self._topology.get_ring()

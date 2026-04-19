@@ -1,6 +1,7 @@
 from paravon.bootstrap.deps import get_peer_app, get_core
 from paravon.core.models.message import Message
-
+from paravon.core.models.version import HLC
+from paravon.core.space.partition import LogicalPartition
 
 app = get_peer_app()
 
@@ -84,7 +85,13 @@ async def forward_put(data: dict) -> Message:
     return msg
 
 
-@app.request("partition/fetch")
-async def fetch_partition(data: dict) -> Message:
+@app.request("rebalance/fetch")
+async def rebalance_fetch(data: dict) -> Message:
     core = get_core()
     return await core.storage.fetch_data(data)
+
+
+@app.request("rebalance/done")
+async def rebalance_done(data: dict) -> Message:
+    core = get_core()
+    return await core.node.mark_partition_done(data)

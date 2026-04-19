@@ -194,6 +194,8 @@ class PlacementStrategy:
         self._replication_factor = replication_factor
 
     def preference_list(self, token: int, ring: Ring) -> list[str]:
+        # naive preference list => vnodes are adding in ring
+        # even if phase is not ready. should skip node if not ready.
         replicas = []
         owner = ring.find_successor(token)
 
