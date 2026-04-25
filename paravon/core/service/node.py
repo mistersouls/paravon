@@ -180,7 +180,7 @@ class NodeService:
         await self._rebalancer.mark_incoming_done(source, pid, hlc)
         membership = await self._meta_manager.get_membership()
         return Message(
-            type="ok",
+            type="rebalance/done",
             data={"source": membership.node_id}
         )
 

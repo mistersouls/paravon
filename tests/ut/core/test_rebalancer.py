@@ -382,13 +382,5 @@ async def test_rebalance_drain_incomplete_rf():
 
     plan = await rebalancer.plan(old_ring, new_ring)
 
-    expected = {
-        ("node-A", 0),
-        ("node-A", 1),
-        ("node-A", 2),
-        ("node-A", 3),
-    }
-
-    assert len(plan.incoming) == 4
+    assert plan.incoming == {}
     assert plan.outgoing == {}
-

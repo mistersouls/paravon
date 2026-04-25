@@ -72,6 +72,7 @@ class Rebalancer:
         self._logger = logging.getLogger("core.cluster.rebalance")
 
         self._peer_clients.subscribe("rebalance/fetch", self)
+        self._peer_clients.subscribe("rebalance/done", self)
 
     async def handle(self, message: Message) -> None:
         if message.type != "rebalance/fetch":
@@ -135,11 +136,11 @@ class Rebalancer:
                 last_hlc = await self._storage_service.last_hlc_for({
                     "keyspace": partition.pid_bytes
                 })
-                if len(leavers) == len(joiners):
-                    source = joiners[leavers.index(self._node_id)]
-                else:
-                    source = random.choice(targ_replicas)
+                if len(leavers) != len(joiners):
+                    self._logger.debug(f"Not enough replicas, ignoring pid={pid}")
+                    continue
 
+                source = joiners[leavers.index(self._node_id)]
                 item = RebalancePlanItem(
                     partition=partition,
                     source=source,
@@ -148,6 +149,9 @@ class Rebalancer:
                 incoming[(source, pid)] = item
 
             if idx and idx % yield_every == 0:
+                self._logger.debug(
+                    "Planning rebalance: processed %d/%d partitions", idx, total
+                )
                 await asyncio.sleep(0)
 
         return RebalancePlan(
